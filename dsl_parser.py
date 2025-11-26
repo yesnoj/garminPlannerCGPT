@@ -75,7 +75,7 @@ def parse_duration_part(base_str: str) -> Tuple[str, Optional[float], Optional[s
     Parsea la parte prima di '@' per ricavare:
       - tipo condizione ('time' o 'distance' o 'lap.button')
       - valore numerico (secondi o metri)
-      - unità preferita
+      - unitÃ  preferita
     """
     s = base_str.strip().lower()
 
@@ -86,7 +86,8 @@ def parse_duration_part(base_str: str) -> Tuple[str, Optional[float], Optional[s
     # ORDINE IMPORTANTE: distanze PRIMA di tempi per evitare confusione tra "m" (metri) e "m" (minuti abbreviato)
     
     # Metri: "1000m", "200m", "1500 m" - DEVE essere prima di "min"
-    m = re.match(r"^(\d+(?:\.\d+)?)\s*m(?:\s|$)", s)
+    # IMPORTANTE: negative lookahead (?!i) per NON catturare "min" come metri
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*m(?!i)(?:\s|$)", s)
     if m:
         meters = float(m.group(1))
         return "distance", meters, "meter"
@@ -100,7 +101,7 @@ def parse_duration_part(base_str: str) -> Tuple[str, Optional[float], Optional[s
 
     # ORA i tempi
     # Minuti: "10min", "10 min", "40'", "35 '"
-    m = re.match(r"^(\d+)\s*(?:min|'|′)(?:\s|$)", s)
+    m = re.match(r"^(\d+)\s*(?:min|'|â€²)(?:\s|$)", s)
     if m:
         minutes = int(m.group(1))
         return "time", float(minutes * 60), None
@@ -438,7 +439,7 @@ def parse_target(target_str: str, df_parameters: Optional[pd.DataFrame] = None) 
             }
     
     # NUOVO: Parametri custom di ritmo (recovery, marathon, threshold, easy_range, ecc.)
-    # Cerca qualsiasi parametro in Parameters che non sia già stato gestito
+    # Cerca qualsiasi parametro in Parameters che non sia giÃ  stato gestito
     custom_pace = get_parameter_value(s, df_parameters)
     if custom_pace:
         # Trovato un parametro custom, prova a parsarlo come ritmo
@@ -580,7 +581,7 @@ def parse_step_line(
         "zoneNumber": target_info["zoneNumber"],
     }
 
-    # Aggiungi endConditionValue solo se non è lap.button
+    # Aggiungi endConditionValue solo se non Ã¨ lap.button
     if end_condition_value is not None:
         step["endConditionValue"] = end_condition_value
     

@@ -91,69 +91,104 @@ class TrainingPlannerGUI:
         self.lbl_file.pack(side=tk.LEFT, padx=10)
 
         # Garmin frame
-        garmin_frame = ttk.LabelFrame(self.root, text="Garmin Connect", padding=5)
+        garmin_frame = ttk.LabelFrame(self.root, text="Garmin Connect", padding=8)
         garmin_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
-        ttk.Label(garmin_frame, text="Email:").grid(row=0, column=0, sticky="w")
-        self.entry_email = ttk.Entry(garmin_frame, width=30)
-        self.entry_email.grid(row=0, column=1, sticky="w", padx=5)
+        # layout colonne: la colonna 1 si espande un po' per le entry
+        for col in range(5):
+            garmin_frame.columnconfigure(col, weight=0)
+        garmin_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(garmin_frame, text="Password:").grid(row=1, column=0, sticky="w")
-        self.entry_password = ttk.Entry(garmin_frame, width=30, show="*")
-        self.entry_password.grid(row=1, column=1, sticky="w", padx=5)
+        # riga 0: email + login + stato
+        ttk.Label(garmin_frame, text="Email:").grid(
+            row=0, column=0, sticky="e", padx=(0, 4), pady=2
+        )
+        self.entry_email = ttk.Entry(garmin_frame, width=30)
+        self.entry_email.grid(
+            row=0, column=1, sticky="we", padx=(0, 8), pady=2
+        )
 
         btn_login_creds = ttk.Button(
             garmin_frame,
             text="Login (crea/aggiorna sessione)",
             command=self.login_garmin_with_credentials,
         )
-        btn_login_creds.grid(row=0, column=2, rowspan=2, padx=10)
+        btn_login_creds.grid(
+            row=0, column=2, sticky="w", padx=(0, 4), pady=2
+        )
 
         btn_login_session = ttk.Button(
             garmin_frame,
             text="Usa sessione salvata",
             command=self.login_garmin_with_session,
         )
-        btn_login_session.grid(row=0, column=3, rowspan=2, padx=10)
+        btn_login_session.grid(
+            row=0, column=3, sticky="w", padx=(0, 4), pady=2
+        )
 
-        self.lbl_garmin_status = ttk.Label(garmin_frame, text="Non connesso", foreground="red")
-        self.lbl_garmin_status.grid(row=0, column=4, rowspan=2, padx=5)
+        self.lbl_garmin_status = ttk.Label(
+            garmin_frame, text="Non connesso", foreground="red"
+        )
+        self.lbl_garmin_status.grid(
+            row=0, column=4, sticky="w", padx=(4, 0), pady=2
+        )
 
+        # riga 1: password
+        ttk.Label(garmin_frame, text="Password:").grid(
+            row=1, column=0, sticky="e", padx=(0, 4), pady=2
+        )
+        self.entry_password = ttk.Entry(garmin_frame, width=30, show="*")
+        self.entry_password.grid(
+            row=1, column=1, sticky="we", padx=(0, 8), pady=2
+        )
+
+        # riga 2: opzione prefisso
         chk_prefix = ttk.Checkbutton(
             garmin_frame,
             text="Prefisso nome WnSn (Week/Session)",
             variable=self.use_prefix_var,
         )
-        chk_prefix.grid(row=2, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        chk_prefix.grid(
+            row=2, column=0, columnspan=3, sticky="w", padx=(0, 4), pady=(4, 2)
+        )
 
-
+        # riga 3: bottoni operazioni
         btn_upload = ttk.Button(
             garmin_frame,
             text="Carica workout selezionati su Garmin",
             command=self.upload_selected_workouts,
         )
-        btn_upload.grid(row=3, column=0, columnspan=2, sticky="w", pady=5)
+        btn_upload.grid(
+            row=3, column=0, columnspan=2, sticky="w", padx=(0, 4), pady=(4, 2)
+        )
 
         btn_upload_plan = ttk.Button(
             garmin_frame,
             text="Carica + pianifica selezionati",
             command=self.upload_and_schedule_selected_workouts,
         )
-        btn_upload_plan.grid(row=3, column=2, sticky="w", pady=5)
+        btn_upload_plan.grid(
+            row=3, column=2, sticky="w", padx=(0, 4), pady=(4, 2)
+        )
 
         btn_unschedule = ttk.Button(
             garmin_frame,
             text="Rimuovi pianificazione selezionati",
             command=self.unschedule_selected_workouts,
         )
-        btn_unschedule.grid(row=3, column=3, sticky="w", pady=5)
+        btn_unschedule.grid(
+            row=3, column=3, sticky="w", padx=(0, 4), pady=(4, 2)
+        )
 
         btn_delete = ttk.Button(
             garmin_frame,
             text="Cancella da Garmin selezionati",
             command=self.delete_workouts_from_garmin,
         )
-        btn_delete.grid(row=3, column=4, sticky="w", pady=5)
+        btn_delete.grid(
+            row=3, column=4, sticky="w", padx=(0, 0), pady=(4, 2)
+        )
+
 
 
         # Main split
