@@ -19,6 +19,8 @@ class TrainingPlannerGUI:
         self.df_parameters: pd.DataFrame | None = None
 
         self.garmin = GarminService()
+        self.use_prefix_var = tk.BooleanVar(value=True)
+
 
         self._build_ui()
 
@@ -68,6 +70,14 @@ class TrainingPlannerGUI:
 
         self.lbl_garmin_status = ttk.Label(garmin_frame, text="Non connesso", foreground="red")
         self.lbl_garmin_status.grid(row=0, column=4, rowspan=2, padx=5)
+
+        chk_prefix = ttk.Checkbutton(
+            garmin_frame,
+            text="Prefisso nome WnSn (Week/Session)",
+            variable=self.use_prefix_var,
+        )
+        chk_prefix.grid(row=2, column=0, columnspan=3, sticky="w", pady=(5, 0))
+
 
         btn_upload = ttk.Button(
             garmin_frame,
@@ -651,7 +661,13 @@ class TrainingPlannerGUI:
         for idx in idxs:
             row = self.df_workouts.iloc[idx]
             steps_text = str(row.get("Steps", ""))
-            workout_data = build_garmin_workout_from_excel_row(row, steps_text, self.df_parameters)
+            workout_data = build_garmin_workout_from_excel_row(
+                row,
+                steps_text,
+                self.df_parameters,
+                use_prefix=self.use_prefix_var.get(),
+            )
+
             try:
                 resp = self.garmin.save_workout(workout_data)
                 workout_id = resp.get("workoutId") or resp.get("workout_id")
@@ -732,8 +748,12 @@ class TrainingPlannerGUI:
 
             if not workout_id:
                 workout_data = build_garmin_workout_from_excel_row(
-                    row, steps_text, self.df_parameters
+                    row,
+                    steps_text,
+                    self.df_parameters,
+                    use_prefix=self.use_prefix_var.get(),
                 )
+
                 try:
                     resp = self.garmin.save_workout(workout_data)
                     workout_id = str(

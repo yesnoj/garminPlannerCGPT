@@ -674,11 +674,29 @@ def build_garmin_workout_from_excel_row(
     row: pd.Series,
     steps_text: str,
     df_parameters: Optional[pd.DataFrame] = None,
+    use_prefix: bool = False,
 ) -> Dict[str, Any]:
     """Costruisce il workout JSON Garmin da Excel."""
+
+    # Nome base dal campo Description
     workout_name = str(row.get("Description", "") or "").strip()
     if not workout_name:
         workout_name = "Workout"
+
+    # Prefisso opzionale W{Week}S{Session}
+    if use_prefix:
+        week = str(row.get("Week", "") or "").strip()
+        session = str(row.get("Session", "") or "").strip()
+
+        parts = []
+        if week:
+            parts.append(f"W{week}")
+        if session:
+            parts.append(f"S{session}")
+
+        if parts:
+            prefix = "".join(parts) + " - "
+            workout_name = prefix + workout_name
 
     sport_type = map_sport_type(row)
 
