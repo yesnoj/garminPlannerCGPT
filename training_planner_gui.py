@@ -91,104 +91,118 @@ class TrainingPlannerGUI:
         self.lbl_file.pack(side=tk.LEFT, padx=10)
 
         # Garmin frame
-        garmin_frame = ttk.LabelFrame(self.root, text="Garmin Connect", padding=8)
+        garmin_frame = ttk.LabelFrame(self.root, text="Garmin Connect", padding=10)
         garmin_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
-        # layout colonne: la colonna 1 si espande un po' per le entry
-        for col in range(5):
-            garmin_frame.columnconfigure(col, weight=0)
-        garmin_frame.columnconfigure(1, weight=1)
+        # Configurazione colonne per layout responsive
+        garmin_frame.columnconfigure(1, weight=1)  # Entry email/password si espandono
 
-        # riga 0: email + login + stato
+        # ========== SEZIONE AUTENTICAZIONE ==========
+        
+        # Riga 0: Email
         ttk.Label(garmin_frame, text="Email:").grid(
-            row=0, column=0, sticky="e", padx=(0, 4), pady=2
+            row=0, column=0, sticky="e", padx=(0, 8), pady=(0, 5)
         )
-        self.entry_email = ttk.Entry(garmin_frame, width=30)
+        self.entry_email = ttk.Entry(garmin_frame, width=35)
         self.entry_email.grid(
-            row=0, column=1, sticky="we", padx=(0, 8), pady=2
+            row=0, column=1, columnspan=2, sticky="we", padx=(0, 10), pady=(0, 5)
         )
-
+        
+        # Riga 1: Password
+        ttk.Label(garmin_frame, text="Password:").grid(
+            row=1, column=0, sticky="e", padx=(0, 8), pady=(0, 8)
+        )
+        self.entry_password = ttk.Entry(garmin_frame, width=35, show="*")
+        self.entry_password.grid(
+            row=1, column=1, columnspan=2, sticky="we", padx=(0, 10), pady=(0, 8)
+        )
+        
+        # Bottoni login sulla destra
+        btn_frame_login = ttk.Frame(garmin_frame)
+        btn_frame_login.grid(row=0, column=3, rowspan=2, sticky="nsew", padx=(10, 0))
+        
         btn_login_creds = ttk.Button(
-            garmin_frame,
+            btn_frame_login,
             text="Login (crea/aggiorna sessione)",
             command=self.login_garmin_with_credentials,
         )
-        btn_login_creds.grid(
-            row=0, column=2, sticky="w", padx=(0, 4), pady=2
-        )
+        btn_login_creds.pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
 
         btn_login_session = ttk.Button(
-            garmin_frame,
+            btn_frame_login,
             text="Usa sessione salvata",
             command=self.login_garmin_with_session,
         )
-        btn_login_session.grid(
-            row=0, column=3, sticky="w", padx=(0, 4), pady=2
-        )
-
+        btn_login_session.pack(side=tk.TOP, fill=tk.X)
+        
+        # Status sulla destra dei bottoni login
         self.lbl_garmin_status = ttk.Label(
-            garmin_frame, text="Non connesso", foreground="red"
+            garmin_frame, text="● Non connesso", foreground="red", font=("", 9, "bold")
         )
         self.lbl_garmin_status.grid(
-            row=0, column=4, sticky="w", padx=(4, 0), pady=2
+            row=0, column=4, rowspan=2, sticky="w", padx=(15, 0)
         )
 
-        # riga 1: password
-        ttk.Label(garmin_frame, text="Password:").grid(
-            row=1, column=0, sticky="e", padx=(0, 4), pady=2
-        )
-        self.entry_password = ttk.Entry(garmin_frame, width=30, show="*")
-        self.entry_password.grid(
-            row=1, column=1, sticky="we", padx=(0, 8), pady=2
+        # Separatore
+        ttk.Separator(garmin_frame, orient="horizontal").grid(
+            row=2, column=0, columnspan=5, sticky="ew", pady=10
         )
 
-        # riga 2: opzione prefisso
+        # ========== SEZIONE OPZIONI ==========
+        
+        # Riga 3: Checkbox prefisso
         chk_prefix = ttk.Checkbutton(
             garmin_frame,
-            text="Prefisso nome WnSn (Week/Session)",
+            text="☑ Prefisso nome WnSn (Week/Session)",
             variable=self.use_prefix_var,
         )
         chk_prefix.grid(
-            row=2, column=0, columnspan=3, sticky="w", padx=(0, 4), pady=(4, 2)
+            row=3, column=0, columnspan=5, sticky="w", pady=(0, 10)
         )
 
-        # riga 3: bottoni operazioni
+        # Separatore
+        ttk.Separator(garmin_frame, orient="horizontal").grid(
+            row=4, column=0, columnspan=5, sticky="ew", pady=(0, 10)
+        )
+
+        # ========== SEZIONE OPERAZIONI WORKOUT ==========
+        
+        # Frame per bottoni operazioni (riga 5)
+        btn_operations_frame = ttk.Frame(garmin_frame)
+        btn_operations_frame.grid(row=5, column=0, columnspan=5, sticky="ew")
+        
+        # Configura le colonne del frame operazioni per distribuire uniformemente
+        for i in range(4):
+            btn_operations_frame.columnconfigure(i, weight=1)
+        
+        # Bottoni operazioni principali
         btn_upload = ttk.Button(
-            garmin_frame,
-            text="Carica workout selezionati su Garmin",
+            btn_operations_frame,
+            text="📤 Carica su Garmin",
             command=self.upload_selected_workouts,
         )
-        btn_upload.grid(
-            row=3, column=0, columnspan=2, sticky="w", padx=(0, 4), pady=(4, 2)
-        )
+        btn_upload.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
         btn_upload_plan = ttk.Button(
-            garmin_frame,
-            text="Carica + pianifica selezionati",
+            btn_operations_frame,
+            text="📤📅 Carica + Pianifica",
             command=self.upload_and_schedule_selected_workouts,
         )
-        btn_upload_plan.grid(
-            row=3, column=2, sticky="w", padx=(0, 4), pady=(4, 2)
-        )
+        btn_upload_plan.grid(row=0, column=1, sticky="ew", padx=(0, 5))
 
         btn_unschedule = ttk.Button(
-            garmin_frame,
-            text="Rimuovi pianificazione selezionati",
+            btn_operations_frame,
+            text="📅✖ Rimuovi Pianificazione",
             command=self.unschedule_selected_workouts,
         )
-        btn_unschedule.grid(
-            row=3, column=3, sticky="w", padx=(0, 4), pady=(4, 2)
-        )
+        btn_unschedule.grid(row=0, column=2, sticky="ew", padx=(0, 5))
 
         btn_delete = ttk.Button(
-            garmin_frame,
-            text="Cancella da Garmin selezionati",
+            btn_operations_frame,
+            text="🗑 Cancella da Garmin",
             command=self.delete_workouts_from_garmin,
         )
-        btn_delete.grid(
-            row=3, column=4, sticky="w", padx=(0, 0), pady=(4, 2)
-        )
-
+        btn_delete.grid(row=0, column=3, sticky="ew")
 
 
         # Main split
@@ -339,7 +353,7 @@ class TrainingPlannerGUI:
             self.df_workouts = pd.read_excel(path, sheet_name="Workouts")
 
             try:
-                # ðŸ‘‰ forza tutte le colonne di Parameters a stringa
+                # Ã°Å¸â€˜â€° forza tutte le colonne di Parameters a stringa
                 self.df_parameters = pd.read_excel(
                     path,
                     sheet_name="Parameters",
@@ -460,7 +474,7 @@ class TrainingPlannerGUI:
             messagebox.showwarning(
                 "Autosalvataggio fallito",
                 f"Non riesco a salvare su:\n{self.excel_path}\n\nDettagli:\n{e}\n\n"
-                "Chiudi il file in Excel (se ÃƒÂ¨ aperto) e prova a salvare manualmente."
+                "Chiudi il file in Excel (se ÃƒÆ’Ã‚Â¨ aperto) e prova a salvare manualmente."
             )
 
     def populate_workouts_tree(self):
@@ -701,19 +715,19 @@ class TrainingPlannerGUI:
             return
         try:
             self.garmin.login_with_credentials(email, password)
-            self.lbl_garmin_status.config(text="Connesso", foreground="green")
+            self.lbl_garmin_status.config(text="● Connesso", foreground="green")
             messagebox.showinfo("OK", "Login a Garmin Connect effettuato (sessione salvata).")
         except Exception as e:
-            self.lbl_garmin_status.config(text="Non connesso", foreground="red")
+            self.lbl_garmin_status.config(text="● Non connesso", foreground="red")
             messagebox.showerror("Errore", f"Errore nel login a Garmin:\n{e}")
 
     def login_garmin_with_session(self):
         try:
             self.garmin.login_with_saved_session()
-            self.lbl_garmin_status.config(text="Connesso", foreground="green")
+            self.lbl_garmin_status.config(text="● Connesso", foreground="green")
             messagebox.showinfo("OK", "Login a Garmin Connect effettuato tramite sessione salvata.")
         except Exception as e:
-            self.lbl_garmin_status.config(text="Non connesso", foreground="red")
+            self.lbl_garmin_status.config(text="● Non connesso", foreground="red")
             messagebox.showerror(
                 "Errore",
                 "Errore nel login con sessione salvata:\n"
@@ -884,7 +898,7 @@ class TrainingPlannerGUI:
                     ).strip()
 
                     if not workout_id:
-                        print(f"⚠️ Workout creato (riga {idx}) ma nessun 'workoutId' nella risposta.")
+                        print(f"âš ï¸ Workout creato (riga {idx}) ma nessun 'workoutId' nella risposta.")
                         continue
 
                     self.df_workouts.at[idx, "WorkoutId"] = workout_id
@@ -908,7 +922,7 @@ class TrainingPlannerGUI:
                 if schedule_id:
                     self.df_workouts.at[idx, "WorkoutScheduleId"] = schedule_id
                 else:
-                    print("⚠️ Nessun workoutScheduleId nella risposta:", resp_sched)
+                    print("âš ï¸ Nessun workoutScheduleId nella risposta:", resp_sched)
 
                 self.df_workouts.at[idx, "ScheduledDate"] = date_str
                 self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
@@ -963,7 +977,7 @@ class TrainingPlannerGUI:
                         error_msg = (
                             f"Garmin ha risposto 403 Forbidden nel tentativo di rimuovere "
                             f"la pianificazione (scheduleId {schedule_id}, {sched_date}).\n\n"
-                            f"Questo significa che l'API usata non è autorizzata "
+                            f"Questo significa che l'API usata non Ã¨ autorizzata "
                             f"a cancellare la programmazione. Per questo allenamento dovrai "
                             f"rimuovere la pianificazione manualmente da Garmin Connect.\n\n"
                             f"Dettagli tecnici:\n{msg}"
@@ -977,7 +991,7 @@ class TrainingPlannerGUI:
                 self.root.after(0, self.autosave_to_loaded_excel)
                 return True, f"Rimossi {removed} workout dalla programmazione."
             else:
-                msg = ("Nessun workout è stato rimosso.\n"
+                msg = ("Nessun workout Ã¨ stato rimosso.\n"
                        "Verifica che le righe selezionate abbiano sia ScheduledDate sia WorkoutScheduleId compilati.")
                 return True, msg
         
@@ -1003,7 +1017,7 @@ class TrainingPlannerGUI:
         # Conferma utente (operazione distruttiva)
         confirm_msg = (
             "Vuoi cancellare DEFINITIVAMENTE i workout selezionati dalla libreria Garmin?\n"
-            "Se sono pianificati, verrà prima rimossa la pianificazione."
+            "Se sono pianificati, verrÃ  prima rimossa la pianificazione."
         )
         if messagebox.askyesno("Conferma", confirm_msg) is False:
             return
@@ -1028,7 +1042,7 @@ class TrainingPlannerGUI:
                 if sched_date.lower() in ("nan", "<na>"):
                     sched_date = ""
 
-                # 1) se c'è una pianificazione, prova a toglierla
+                # 1) se c'Ã¨ una pianificazione, prova a toglierla
                 if schedule_id and sched_date:
                     try:
                         loading.update_message(f"Rimozione pianificazione workout {i}/{num_workouts}...")
@@ -1040,7 +1054,7 @@ class TrainingPlannerGUI:
                     except Exception as e:
                         # Non blocco la cancellazione del workout, ma avviso
                         print(
-                            f"⚠️ Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
+                            f"âš ï¸ Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
                         )
 
                 # 2) cancella il workout dalla libreria
@@ -1060,7 +1074,7 @@ class TrainingPlannerGUI:
                 self.root.after(0, self.autosave_to_loaded_excel)
                 return True, f"Cancellati definitivamente {deleted} workout dalla libreria Garmin."
             else:
-                return True, "Nessun workout è stato cancellato (nessun WorkoutId valido nelle righe selezionate)."
+                return True, "Nessun workout Ã¨ stato cancellato (nessun WorkoutId valido nelle righe selezionate)."
         
         self._run_with_loading(operation, "Cancellazione workout da Garmin")
 
