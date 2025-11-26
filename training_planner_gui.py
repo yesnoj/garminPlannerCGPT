@@ -90,6 +90,14 @@ class TrainingPlannerGUI:
         )
         btn_unschedule.grid(row=3, column=3, sticky="w", pady=5)
 
+        btn_delete = ttk.Button(
+            garmin_frame,
+            text="Cancella da Garmin selezionati",
+            command=self.delete_workouts_from_garmin,
+        )
+        btn_delete.grid(row=3, column=4, sticky="w", pady=5)
+
+
         # Main split
         main_pane = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
         main_pane.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -235,34 +243,33 @@ class TrainingPlannerGUI:
         if not path:
             return
         try:
-            # Foglio Workouts
             self.df_workouts = pd.read_excel(path, sheet_name="Workouts")
 
-            # Foglio Parameters (se manca, crea df vuoto con le colonne giuste)
             try:
-                self.df_parameters = pd.read_excel(path, sheet_name="Parameters")
-            except Exception:
-                self.df_parameters = pd.DataFrame(
-                    columns=["Key", "Metric", "Expression", "Notes"]
+                # 👉 forza tutte le colonne di Parameters a stringa
+                self.df_parameters = pd.read_excel(
+                    path,
+                    sheet_name="Parameters",
+                    dtype={"Key": str, "Metric": str, "Expression": str, "Notes": str},
                 )
+            except Exception:
+                self.df_parameters = pd.DataFrame(columns=["Key", "Metric", "Expression", "Notes"])
 
-            # Assicurati che le colonne di servizio esistano SEMPRE
-            for col in ["WorkoutId", "WorkoutScheduleId", "ScheduledDate"]:
+            for col in ["WorkoutId", "ScheduledDate"]:
                 if col not in self.df_workouts.columns:
                     self.df_workouts[col] = ""
 
-            # Forza tipo stringa per evitare problemi / warning
-            for col in ["WorkoutId", "WorkoutScheduleId", "ScheduledDate"]:
-                if col in self.df_workouts.columns:
-                    self.df_workouts[col] = self.df_workouts[col].astype("string")
+            # forza tipo stringa per evitare future warning
+            if "WorkoutId" in self.df_workouts.columns:
+                self.df_workouts["WorkoutId"] = self.df_workouts["WorkoutId"].astype("string")
+            if "ScheduledDate" in self.df_workouts.columns:
+                self.df_workouts["ScheduledDate"] = self.df_workouts["ScheduledDate"].astype("string")
 
-            # Aggiorna stato GUI
             self.excel_path = path
             self.lbl_file.config(text=path)
             self.populate_workouts_tree()
             self.populate_params_tree()
 
-            # Pulisci i campi di editing a destra
             self.entry_week.delete(0, tk.END)
             self.entry_date.delete(0, tk.END)
             self.entry_session.delete(0, tk.END)
@@ -271,6 +278,7 @@ class TrainingPlannerGUI:
             self.text_json.delete("1.0", tk.END)
         except Exception as e:
             messagebox.showerror("Errore", f"Impossibile caricare l'Excel:\n{e}")
+
 
 
     def write_excel(self, path: str):
@@ -846,6 +854,90 @@ class TrainingPlannerGUI:
                 "Info",
                 "Nessun workout è stato rimosso.\n"
                 "Verifica che le righe selezionate abbiano sia ScheduledDate sia WorkoutScheduleId compilati."
+            )
+
+    def delete_workouts_from_garmin(self):
+        """
+        Per ogni riga selezionata:
+        - se ha una pianificazione (WorkoutScheduleId + ScheduledDate), prova a rimuoverla;
+        - cancella il workout dalla libreria Garmin;
+        - pulisce WorkoutId, WorkoutScheduleId e ScheduledDate nell'Excel.
+        """
+        if self.garmin.client is None:
+            messagebox.showerror("Errore", "Non sei connesso a Garmin.")
+            return
+
+        idxs = self._get_selected_indices()
+        if not idxs:
+            return
+
+        # Conferma utente (operazione distruttiva)
+        if messagebox.askyesno(
+            "Conferma",
+            "Vuoi cancellare DEFINITIVAMENTE i workout selezionati dalla libreria Garmin?\n"
+            "Se sono pianificati, verrà prima rimossa la pianificazione.",
+        ) is False:
+            return
+
+        deleted = 0
+
+        for idx in idxs:
+            row = self.df_workouts.iloc[idx]
+
+            workout_id = self.normalize_workout_id(row.get("WorkoutId", ""))
+            if not workout_id:
+                # niente da cancellare su Garmin
+                continue
+
+            schedule_id = self.normalize_workout_id(row.get("WorkoutScheduleId", ""))
+            sched_date = row.get("ScheduledDate", "")
+            sched_date = "" if pd.isna(sched_date) else str(sched_date).strip()
+            if sched_date.lower() in ("nan", "<na>"):
+                sched_date = ""
+
+            # 1) se c'è una pianificazione, prova a toglierla
+            if schedule_id and sched_date:
+                try:
+                    self.garmin.unschedule_workout(schedule_id, sched_date)
+                    print(
+                        f"Dis-pianificato workoutScheduleId {schedule_id} ({sched_date}) "
+                        f"prima della cancellazione definiva."
+                    )
+                except Exception as e:
+                    # Non blocco la cancellazione del workout, ma avviso
+                    print(
+                        f"⚠️ Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
+                    )
+
+            # 2) cancella il workout dalla libreria
+            try:
+                self.garmin.delete_workout(workout_id)
+            except Exception as e:
+                messagebox.showerror(
+                    "Errore",
+                    f"Errore nella cancellazione del workout {workout_id} da Garmin:\n{e}",
+                )
+                return
+
+            # 3) pulisco i campi collegati alla parte Garmin
+            self.df_workouts.at[idx, "WorkoutId"] = ""
+            if "WorkoutScheduleId" in self.df_workouts.columns:
+                self.df_workouts.at[idx, "WorkoutScheduleId"] = ""
+            if "ScheduledDate" in self.df_workouts.columns:
+                self.df_workouts.at[idx, "ScheduledDate"] = ""
+            self.refresh_tree_row(idx)
+            deleted += 1
+
+        if deleted:
+            self.autosave_to_loaded_excel()
+            messagebox.showinfo(
+                "OK",
+                f"Cancellati definitivamente {deleted} workout dalla libreria Garmin.",
+            )
+        else:
+            messagebox.showinfo(
+                "Info",
+                "Nessun workout è stato cancellato (nessun WorkoutId valido nelle righe selezionate).",
             )
 
 

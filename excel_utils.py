@@ -13,6 +13,7 @@ def format_workbook_dates_and_steps(path: str):
     - wrap text per Steps e Description
     - altezza riga in base al numero di righe di Steps
     - larghezze colonne per Workouts, Parameters e Esempi DSL
+    - colonna Expression del foglio Parameters forzata a TESTO
     """
     wb = load_workbook(path)
 
@@ -86,6 +87,12 @@ def format_workbook_dates_and_steps(path: str):
         ws_params.column_dimensions["B"].width = 10   # Metric
         ws_params.column_dimensions["C"].width = 18   # Expression
         ws_params.column_dimensions["D"].width = 40   # Notes
+
+        # 🔴 FORZA Expression (colonna C) come TESTO ('@')
+        expr_col_letter = "C"
+        for row_idx in range(2, ws_params.max_row + 1):
+            cell = ws_params[f"{expr_col_letter}{row_idx}"]
+            cell.number_format = "@"
 
     # ----- Sheet Esempi DSL -----
     if "Esempi DSL" in wb.sheetnames:

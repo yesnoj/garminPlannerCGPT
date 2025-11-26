@@ -123,6 +123,17 @@ class GarminService:
         self.ensure_authenticated()
         garmin_client.remove_workout_schedule(schedule_id, date_str)
 
+
+    def delete_workout(self, workout_id: str) -> None:
+        """
+        Cancella definitivamente un workout dalla libreria Garmin.
+
+        Args:
+            workout_id: ID del workout
+        """
+        self.ensure_authenticated()
+        garmin_client.delete_workout_definition(workout_id)
+
     
     # Proprietà per compatibilità con il codice esistente
     @property
