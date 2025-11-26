@@ -3,10 +3,58 @@ from tkinter import ttk, filedialog, messagebox
 import pandas as pd
 import json
 from datetime import datetime
+import threading
 
 from excel_utils import generate_training_excel, format_workbook_dates_and_steps
 from dsl_parser import expand_repeat_lines, build_garmin_workout_from_excel_row
 from garmin_service import GarminService
+
+
+class LoadingDialog:
+    """Finestra di loading modale con animazione."""
+    
+    def __init__(self, parent, title="Operazione in corso..."):
+        self.top = tk.Toplevel(parent)
+        self.top.title(title)
+        self.top.transient(parent)
+        self.top.grab_set()
+        
+        # Centra la finestra
+        self.top.geometry("300x100")
+        self.top.resizable(False, False)
+        
+        # Frame principale
+        frame = ttk.Frame(self.top, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Label con messaggio
+        self.label = ttk.Label(frame, text="Attendere...", font=("", 10))
+        self.label.pack(pady=(0, 10))
+        
+        # Progress bar indeterminata
+        self.progress = ttk.Progressbar(frame, mode='indeterminate', length=250)
+        self.progress.pack()
+        self.progress.start(10)
+        
+        # Impedisci chiusura con X
+        self.top.protocol("WM_DELETE_WINDOW", lambda: None)
+        
+        # Centra rispetto al parent
+        self.top.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.top.winfo_width() // 2)
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.top.winfo_height() // 2)
+        self.top.geometry(f"+{x}+{y}")
+    
+    def update_message(self, message: str):
+        """Aggiorna il messaggio mostrato."""
+        self.label.config(text=message)
+        self.top.update_idletasks()
+    
+    def close(self):
+        """Chiude la finestra di loading."""
+        self.progress.stop()
+        self.top.grab_release()
+        self.top.destroy()
 
 
 class TrainingPlannerGUI:
@@ -256,7 +304,7 @@ class TrainingPlannerGUI:
             self.df_workouts = pd.read_excel(path, sheet_name="Workouts")
 
             try:
-                # 👉 forza tutte le colonne di Parameters a stringa
+                # ðŸ‘‰ forza tutte le colonne di Parameters a stringa
                 self.df_parameters = pd.read_excel(
                     path,
                     sheet_name="Parameters",
@@ -377,7 +425,7 @@ class TrainingPlannerGUI:
             messagebox.showwarning(
                 "Autosalvataggio fallito",
                 f"Non riesco a salvare su:\n{self.excel_path}\n\nDettagli:\n{e}\n\n"
-                "Chiudi il file in Excel (se Ã¨ aperto) e prova a salvare manualmente."
+                "Chiudi il file in Excel (se ÃƒÂ¨ aperto) e prova a salvare manualmente."
             )
 
     def populate_workouts_tree(self):
@@ -649,6 +697,45 @@ class TrainingPlannerGUI:
             return []
         return [int(iid) for iid in sel]
 
+    def _run_with_loading(self, operation_func, title="Operazione in corso..."):
+        """
+        Esegue una funzione mostrando un dialog di loading.
+        La funzione viene eseguita in un thread separato per non bloccare la GUI.
+        
+        Args:
+            operation_func: Funzione da eseguire (deve ritornare (success, message))
+            title: Titolo del dialog di loading
+        """
+        loading = LoadingDialog(self.root, title)
+        result = {"success": False, "message": ""}
+        
+        def worker():
+            try:
+                success, message = operation_func(loading)
+                result["success"] = success
+                result["message"] = message
+            except Exception as e:
+                result["success"] = False
+                result["message"] = str(e)
+            finally:
+                # Chiudi il loading nella GUI thread
+                self.root.after(0, loading.close)
+        
+        # Avvia il worker thread
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        
+        # Aspetta che il thread finisca
+        while thread.is_alive():
+            self.root.update()
+            thread.join(timeout=0.1)
+        
+        # Mostra il risultato
+        if result["success"]:
+            messagebox.showinfo("OK", result["message"])
+        else:
+            messagebox.showerror("Errore", result["message"])
+
     def upload_selected_workouts(self):
         if self.garmin.client is None:
             messagebox.showerror("Errore", "Non sei connesso a Garmin.")
@@ -657,30 +744,33 @@ class TrainingPlannerGUI:
         if not idxs:
             return
 
-        created_ids = []
-        for idx in idxs:
-            row = self.df_workouts.iloc[idx]
-            steps_text = str(row.get("Steps", ""))
-            workout_data = build_garmin_workout_from_excel_row(
-                row,
-                steps_text,
-                self.df_parameters,
-                use_prefix=self.use_prefix_var.get(),
-            )
+        def operation(loading):
+            created_ids = []
+            total = len(idxs)
+            
+            for i, idx in enumerate(idxs, 1):
+                loading.update_message(f"Caricamento workout {i}/{total}...")
+                
+                row = self.df_workouts.iloc[idx]
+                steps_text = str(row.get("Steps", ""))
+                workout_data = build_garmin_workout_from_excel_row(
+                    row,
+                    steps_text,
+                    self.df_parameters,
+                    use_prefix=self.use_prefix_var.get(),
+                )
 
-            try:
                 resp = self.garmin.save_workout(workout_data)
                 workout_id = resp.get("workoutId") or resp.get("workout_id")
                 if workout_id:
                     self.df_workouts.at[idx, "WorkoutId"] = str(workout_id)
                     created_ids.append(workout_id)
-                    self.refresh_tree_row(idx)
-            except Exception as e:
-                messagebox.showerror("Errore", f"Errore nel creare il workout (riga {idx}):\n{e}")
-                return
+                    self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
 
-        self.autosave_to_loaded_excel()
-        messagebox.showinfo("OK", f"Creati {len(created_ids)} workout su Garmin.")
+            self.root.after(0, self.autosave_to_loaded_excel)
+            return True, f"Creati {len(created_ids)} workout su Garmin."
+        
+        self._run_with_loading(operation, "Caricamento workout su Garmin")
 
     def normalize_workout_id(self, value) -> str:
         """Converte il WorkoutId in stringa pulita per le API Garmin."""
@@ -713,48 +803,45 @@ class TrainingPlannerGUI:
         if not idxs:
             return
 
-        total = 0
+        def operation(loading):
+            total = 0
+            num_workouts = len(idxs)
 
-        for idx in idxs:
-            row = self.df_workouts.iloc[idx]
-            steps_text = str(row.get("Steps", ""))
+            for i, idx in enumerate(idxs, 1):
+                loading.update_message(f"Elaborazione workout {i}/{num_workouts}...")
+                
+                row = self.df_workouts.iloc[idx]
+                steps_text = str(row.get("Steps", ""))
 
-            # ---- DATA: sempre quella della colonna Date ----
-            date_val = row.get("Date", "")
-            if isinstance(date_val, str):
-                date_str = date_val.strip()
-            else:
+                # ---- DATA: sempre quella della colonna Date ----
+                date_val = row.get("Date", "")
+                if isinstance(date_val, str):
+                    date_str = date_val.strip()
+                else:
+                    try:
+                        date_str = pd.to_datetime(date_val).date().isoformat()
+                    except Exception:
+                        raise ValueError(f"Data non valida per workout indice {idx}.")
+
+                # Validazione formato YYYY-MM-DD
                 try:
-                    date_str = pd.to_datetime(date_val).date().isoformat()
-                except Exception:
-                    messagebox.showerror(
-                        "Errore",
-                        f"Data non valida per workout indice {idx}.",
+                    datetime.strptime(date_str, "%Y-%m-%d")
+                except ValueError:
+                    raise ValueError(f"Formato data non valido per workout indice {idx}: {date_str}")
+
+                # ---- WORKOUT ID: se manca, crea il workout su Garmin ----
+                workout_id = self.normalize_workout_id(row.get("WorkoutId", ""))
+
+                if not workout_id:
+                    loading.update_message(f"Creazione workout {i}/{num_workouts}...")
+                    
+                    workout_data = build_garmin_workout_from_excel_row(
+                        row,
+                        steps_text,
+                        self.df_parameters,
+                        use_prefix=self.use_prefix_var.get(),
                     )
-                    return
 
-            # Validazione formato YYYY-MM-DD
-            try:
-                datetime.strptime(date_str, "%Y-%m-%d")
-            except ValueError:
-                messagebox.showerror(
-                    "Errore",
-                    f"Formato data non valido per workout indice {idx}: {date_str}",
-                )
-                return
-
-            # ---- WORKOUT ID: se manca, crea il workout su Garmin ----
-            workout_id = self.normalize_workout_id(row.get("WorkoutId", ""))
-
-            if not workout_id:
-                workout_data = build_garmin_workout_from_excel_row(
-                    row,
-                    steps_text,
-                    self.df_parameters,
-                    use_prefix=self.use_prefix_var.get(),
-                )
-
-                try:
                     resp = self.garmin.save_workout(workout_data)
                     workout_id = str(
                         (resp.get("workoutId") if isinstance(resp, dict) else "")
@@ -762,28 +849,19 @@ class TrainingPlannerGUI:
                     ).strip()
 
                     if not workout_id:
-                        messagebox.showwarning(
-                            "Attenzione",
-                            f"Workout creato (riga {idx}) ma nessun 'workoutId' nella risposta.",
-                        )
+                        print(f"⚠️ Workout creato (riga {idx}) ma nessun 'workoutId' nella risposta.")
                         continue
 
                     self.df_workouts.at[idx, "WorkoutId"] = workout_id
-                    self.refresh_tree_row(idx)
-                except Exception as e:
-                    messagebox.showerror(
-                        "Errore",
-                        f"Errore nel creare il workout (riga {idx}):\n{e}",
-                    )
-                    return
+                    self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
 
-            # ---- PIANIFICAZIONE: usa schedule_workout e salva WorkoutScheduleId ----
-            try:
+                # ---- PIANIFICAZIONE: usa schedule_workout e salva WorkoutScheduleId ----
+                loading.update_message(f"Pianificazione workout {i}/{num_workouts}...")
+                
                 resp_sched = self.garmin.schedule_workout(workout_id, date_str)
 
                 schedule_id = ""
                 if isinstance(resp_sched, dict):
-                    # nel tuo log: 'workoutScheduleId' è a livello root
                     schedule_id = str(
                         resp_sched.get("workoutScheduleId")
                         or resp_sched.get("workout_schedule_id")
@@ -795,23 +873,16 @@ class TrainingPlannerGUI:
                 if schedule_id:
                     self.df_workouts.at[idx, "WorkoutScheduleId"] = schedule_id
                 else:
-                    # Non blocchiamo il flusso, ma logghiamo in console
                     print("⚠️ Nessun workoutScheduleId nella risposta:", resp_sched)
 
                 self.df_workouts.at[idx, "ScheduledDate"] = date_str
-                self.refresh_tree_row(idx)
+                self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
                 total += 1
 
-            except Exception as e:
-                messagebox.showerror(
-                    "Errore",
-                    f"Errore nel pianificare workout {workout_id} per {date_str}:\n{e}",
-                )
-                return
-
-        # Salva subito su Excel caricato
-        self.autosave_to_loaded_excel()
-        messagebox.showinfo("OK", f"Pianificati {total} workout.")
+            self.root.after(0, self.autosave_to_loaded_excel)
+            return True, f"Pianificati {total} workout."
+        
+        self._run_with_loading(operation, "Caricamento e pianificazione workout")
 
 
     def unschedule_selected_workouts(self):
@@ -824,57 +895,60 @@ class TrainingPlannerGUI:
         if not idxs:
             return
 
-        removed = 0
+        def operation(loading):
+            removed = 0
+            num_workouts = len(idxs)
 
-        for idx in idxs:
-            row = self.df_workouts.iloc[idx]
+            for i, idx in enumerate(idxs, 1):
+                loading.update_message(f"Rimozione pianificazione {i}/{num_workouts}...")
+                
+                row = self.df_workouts.iloc[idx]
 
-            # id della pianificazione, NON il workoutId
-            schedule_id = self.normalize_workout_id(row.get("WorkoutScheduleId", ""))
-            sched_date = row.get("ScheduledDate", "")
-            sched_date = "" if pd.isna(sched_date) else str(sched_date).strip()
-            if sched_date.lower() in ("nan", "<na>"):
-                sched_date = ""
+                # id della pianificazione, NON il workoutId
+                schedule_id = self.normalize_workout_id(row.get("WorkoutScheduleId", ""))
+                sched_date = row.get("ScheduledDate", "")
+                sched_date = "" if pd.isna(sched_date) else str(sched_date).strip()
+                if sched_date.lower() in ("nan", "<na>"):
+                    sched_date = ""
 
-            # Se manca uno dei due, non posso fare nulla
-            if not schedule_id or not sched_date:
-                continue
+                # Se manca uno dei due, non posso fare nulla
+                if not schedule_id or not sched_date:
+                    continue
 
-            try:
-                self.garmin.unschedule_workout(schedule_id, sched_date)
-                # pulisco sia la data che l'id di pianificazione
-                self.df_workouts.at[idx, "ScheduledDate"] = ""
-                self.df_workouts.at[idx, "WorkoutScheduleId"] = ""
-                self.refresh_tree_row(idx)
-                removed += 1
-            except Exception as e:
-                msg = str(e)
-                if "403" in msg:
-                    messagebox.showwarning(
-                        "Operazione non consentita",
-                        "Garmin ha risposto 403 Forbidden nel tentativo di rimuovere "
-                        f"la pianificazione (scheduleId {schedule_id}, {sched_date}).\n\n"
-                        "Questo significa che l'API usata non è autorizzata "
-                        "a cancellare la programmazione. Per questo allenamento dovrai "
-                        "rimuovere la pianificazione manualmente da Garmin Connect.\n\n"
-                        f"Dettagli tecnici:\n{msg}"
-                    )
-                else:
-                    messagebox.showerror(
-                        "Errore",
-                        f"Errore nel rimuovere la pianificazione (scheduleId {schedule_id}, {sched_date}):\n{msg}",
-                    )
-                return
+                try:
+                    self.garmin.unschedule_workout(schedule_id, sched_date)
+                    # pulisco sia la data che l'id di pianificazione
+                    self.df_workouts.at[idx, "ScheduledDate"] = ""
+                    self.df_workouts.at[idx, "WorkoutScheduleId"] = ""
+                    self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
+                    removed += 1
+                except Exception as e:
+                    msg = str(e)
+                    if "403" in msg:
+                        error_msg = (
+                            f"Garmin ha risposto 403 Forbidden nel tentativo di rimuovere "
+                            f"la pianificazione (scheduleId {schedule_id}, {sched_date}).\n\n"
+                            f"Questo significa che l'API usata non è autorizzata "
+                            f"a cancellare la programmazione. Per questo allenamento dovrai "
+                            f"rimuovere la pianificazione manualmente da Garmin Connect.\n\n"
+                            f"Dettagli tecnici:\n{msg}"
+                        )
+                        raise RuntimeError(error_msg)
+                    else:
+                        error_msg = f"Errore nel rimuovere la pianificazione (scheduleId {schedule_id}, {sched_date}):\n{msg}"
+                        raise RuntimeError(error_msg)
 
-        if removed:
-            self.autosave_to_loaded_excel()
-            messagebox.showinfo("OK", f"Rimossi {removed} workout dalla programmazione.")
-        else:
-            messagebox.showinfo(
-                "Info",
-                "Nessun workout è stato rimosso.\n"
-                "Verifica che le righe selezionate abbiano sia ScheduledDate sia WorkoutScheduleId compilati."
-            )
+            if removed:
+                self.root.after(0, self.autosave_to_loaded_excel)
+                return True, f"Rimossi {removed} workout dalla programmazione."
+            else:
+                msg = ("Nessun workout è stato rimosso.\n"
+                       "Verifica che le righe selezionate abbiano sia ScheduledDate sia WorkoutScheduleId compilati.")
+                return True, msg
+        
+        self._run_with_loading(operation, "Rimozione pianificazione workout")
+
+
 
     def delete_workouts_from_garmin(self):
         """
@@ -892,73 +966,68 @@ class TrainingPlannerGUI:
             return
 
         # Conferma utente (operazione distruttiva)
-        if messagebox.askyesno(
-            "Conferma",
+        confirm_msg = (
             "Vuoi cancellare DEFINITIVAMENTE i workout selezionati dalla libreria Garmin?\n"
-            "Se sono pianificati, verrà prima rimossa la pianificazione.",
-        ) is False:
+            "Se sono pianificati, verrà prima rimossa la pianificazione."
+        )
+        if messagebox.askyesno("Conferma", confirm_msg) is False:
             return
 
-        deleted = 0
+        def operation(loading):
+            deleted = 0
+            num_workouts = len(idxs)
 
-        for idx in idxs:
-            row = self.df_workouts.iloc[idx]
+            for i, idx in enumerate(idxs, 1):
+                loading.update_message(f"Cancellazione workout {i}/{num_workouts}...")
+                
+                row = self.df_workouts.iloc[idx]
 
-            workout_id = self.normalize_workout_id(row.get("WorkoutId", ""))
-            if not workout_id:
-                # niente da cancellare su Garmin
-                continue
+                workout_id = self.normalize_workout_id(row.get("WorkoutId", ""))
+                if not workout_id:
+                    # niente da cancellare su Garmin
+                    continue
 
-            schedule_id = self.normalize_workout_id(row.get("WorkoutScheduleId", ""))
-            sched_date = row.get("ScheduledDate", "")
-            sched_date = "" if pd.isna(sched_date) else str(sched_date).strip()
-            if sched_date.lower() in ("nan", "<na>"):
-                sched_date = ""
+                schedule_id = self.normalize_workout_id(row.get("WorkoutScheduleId", ""))
+                sched_date = row.get("ScheduledDate", "")
+                sched_date = "" if pd.isna(sched_date) else str(sched_date).strip()
+                if sched_date.lower() in ("nan", "<na>"):
+                    sched_date = ""
 
-            # 1) se c'è una pianificazione, prova a toglierla
-            if schedule_id and sched_date:
-                try:
-                    self.garmin.unschedule_workout(schedule_id, sched_date)
-                    print(
-                        f"Dis-pianificato workoutScheduleId {schedule_id} ({sched_date}) "
-                        f"prima della cancellazione definiva."
-                    )
-                except Exception as e:
-                    # Non blocco la cancellazione del workout, ma avviso
-                    print(
-                        f"⚠️ Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
-                    )
+                # 1) se c'è una pianificazione, prova a toglierla
+                if schedule_id and sched_date:
+                    try:
+                        loading.update_message(f"Rimozione pianificazione workout {i}/{num_workouts}...")
+                        self.garmin.unschedule_workout(schedule_id, sched_date)
+                        print(
+                            f"Dis-pianificato workoutScheduleId {schedule_id} ({sched_date}) "
+                            f"prima della cancellazione definitiva."
+                        )
+                    except Exception as e:
+                        # Non blocco la cancellazione del workout, ma avviso
+                        print(
+                            f"⚠️ Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
+                        )
 
-            # 2) cancella il workout dalla libreria
-            try:
+                # 2) cancella il workout dalla libreria
+                loading.update_message(f"Cancellazione workout {i}/{num_workouts}...")
                 self.garmin.delete_workout(workout_id)
-            except Exception as e:
-                messagebox.showerror(
-                    "Errore",
-                    f"Errore nella cancellazione del workout {workout_id} da Garmin:\n{e}",
-                )
-                return
 
-            # 3) pulisco i campi collegati alla parte Garmin
-            self.df_workouts.at[idx, "WorkoutId"] = ""
-            if "WorkoutScheduleId" in self.df_workouts.columns:
-                self.df_workouts.at[idx, "WorkoutScheduleId"] = ""
-            if "ScheduledDate" in self.df_workouts.columns:
-                self.df_workouts.at[idx, "ScheduledDate"] = ""
-            self.refresh_tree_row(idx)
-            deleted += 1
+                # 3) pulisco i campi collegati alla parte Garmin
+                self.df_workouts.at[idx, "WorkoutId"] = ""
+                if "WorkoutScheduleId" in self.df_workouts.columns:
+                    self.df_workouts.at[idx, "WorkoutScheduleId"] = ""
+                if "ScheduledDate" in self.df_workouts.columns:
+                    self.df_workouts.at[idx, "ScheduledDate"] = ""
+                self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
+                deleted += 1
 
-        if deleted:
-            self.autosave_to_loaded_excel()
-            messagebox.showinfo(
-                "OK",
-                f"Cancellati definitivamente {deleted} workout dalla libreria Garmin.",
-            )
-        else:
-            messagebox.showinfo(
-                "Info",
-                "Nessun workout è stato cancellato (nessun WorkoutId valido nelle righe selezionate).",
-            )
+            if deleted:
+                self.root.after(0, self.autosave_to_loaded_excel)
+                return True, f"Cancellati definitivamente {deleted} workout dalla libreria Garmin."
+            else:
+                return True, "Nessun workout è stato cancellato (nessun WorkoutId valido nelle righe selezionate)."
+        
+        self._run_with_loading(operation, "Cancellazione workout da Garmin")
 
 
 
