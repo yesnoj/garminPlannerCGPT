@@ -491,6 +491,22 @@ class VisualWorkoutBuilder(tk.Toplevel):
             else:
                 self.steps_listbox.insert(tk.END, item.get_display_text())
     
+    def _count_listbox_rows(self, item) -> int:
+        """Conta quante righe occupa un item nella listbox."""
+        if isinstance(item, RepeatBlock):
+            # 1 riga per l'header del repeat + tutte le righe dei suoi step
+            count = 1
+            for step in item.steps:
+                if isinstance(step, RepeatBlock):
+                    # Repeat innestato: ricorsione
+                    count += self._count_listbox_rows(step)
+                else:
+                    count += 1
+            return count
+        else:
+            # Step normale: 1 riga
+            return 1
+    
     def _edit_selected_step(self, event=None):
         """Modifica lo step selezionato."""
         selection = self.steps_listbox.curselection()
@@ -499,27 +515,53 @@ class VisualWorkoutBuilder(tk.Toplevel):
         
         idx = selection[0]
         
-        # Trova lo step corrispondente (gestendo i repeat blocks)
-        flat_idx = 0
-        for item in self.steps:
+        # Usa approccio ricorsivo per trovare l'item
+        self._find_and_edit_item(self.steps, idx, 0)
+    
+    def _find_and_edit_item(self, items_list, target_idx, current_flat_idx):
+        """Trova ricorsivamente un item e lo modifica."""
+        for item in items_list:
             if isinstance(item, RepeatBlock):
-                if flat_idx == idx:
-                    # Editing repeat block
+                if current_flat_idx == target_idx:
                     self._edit_repeat_block(item)
-                    return
-                flat_idx += 1
+                    return True
                 
-                for step in item.steps:
-                    if flat_idx == idx:
-                        # Editing step dentro repeat
-                        self._edit_step(step)
-                        return
-                    flat_idx += 1
+                current_flat_idx += 1
+                
+                # Ricorsione negli step del repeat
+                result = self._find_and_edit_item_helper(item.steps, target_idx, current_flat_idx)
+                if result['found']:
+                    return True
+                current_flat_idx = result['flat_idx']
             else:
-                if flat_idx == idx:
+                if current_flat_idx == target_idx:
                     self._edit_step(item)
-                    return
-                flat_idx += 1
+                    return True
+                current_flat_idx += 1
+        
+        return False
+    
+    def _find_and_edit_item_helper(self, items_list, target_idx, current_flat_idx):
+        """Helper per ricorsione."""
+        for item in items_list:
+            if isinstance(item, RepeatBlock):
+                if current_flat_idx == target_idx:
+                    self._edit_repeat_block(item)
+                    return {'found': True, 'flat_idx': current_flat_idx}
+                
+                current_flat_idx += 1
+                
+                result = self._find_and_edit_item_helper(item.steps, target_idx, current_flat_idx)
+                if result['found']:
+                    return result
+                current_flat_idx = result['flat_idx']
+            else:
+                if current_flat_idx == target_idx:
+                    self._edit_step(item)
+                    return {'found': True, 'flat_idx': current_flat_idx}
+                current_flat_idx += 1
+        
+        return {'found': False, 'flat_idx': current_flat_idx}
     
     def _edit_step(self, step: WorkoutStep):
         """Apre dialog per modificare uno step."""
@@ -555,30 +597,43 @@ class VisualWorkoutBuilder(tk.Toplevel):
         
         idx = selection[0]
         
-        # Trova e rimuovi lo step
-        flat_idx = 0
-        for i, item in enumerate(self.steps):
+        # Usa approccio ricorsivo per trovare ed eliminare
+        result = self._delete_item_recursive(self.steps, idx, 0)
+        
+        if result['deleted']:
+            self._refresh_steps_list()
+    
+    def _delete_item_recursive(self, items_list, target_idx, current_flat_idx):
+        """
+        Trova e elimina ricorsivamente un item.
+        Returns: {'deleted': bool, 'flat_idx': int}
+        """
+        for i, item in enumerate(items_list):
             if isinstance(item, RepeatBlock):
-                if flat_idx == idx:
-                    # Rimuovi repeat block
-                    self.steps.pop(i)
-                    self._refresh_steps_list()
-                    return
-                flat_idx += 1
+                # Check header del repeat
+                if current_flat_idx == target_idx:
+                    # Rimuovi il RepeatBlock
+                    items_list.pop(i)
+                    return {'deleted': True, 'flat_idx': current_flat_idx}
                 
-                for j, step in enumerate(item.steps):
-                    if flat_idx == idx:
-                        # Rimuovi step da repeat
-                        item.steps.pop(j)
-                        self._refresh_steps_list()
-                        return
-                    flat_idx += 1
+                current_flat_idx += 1
+                
+                # Ricorsione negli step del repeat
+                result = self._delete_item_recursive(item.steps, target_idx, current_flat_idx)
+                if result['deleted']:
+                    return result
+                current_flat_idx = result['flat_idx']
+                
             else:
-                if flat_idx == idx:
-                    self.steps.pop(i)
-                    self._refresh_steps_list()
-                    return
-                flat_idx += 1
+                # Step normale
+                if current_flat_idx == target_idx:
+                    # Rimuovi lo step
+                    items_list.pop(i)
+                    return {'deleted': True, 'flat_idx': current_flat_idx}
+                
+                current_flat_idx += 1
+        
+        return {'deleted': False, 'flat_idx': current_flat_idx}
     
     def _move_step_up(self):
         """Sposta lo step selezionato in su."""
@@ -588,31 +643,55 @@ class VisualWorkoutBuilder(tk.Toplevel):
         
         idx = selection[0]
         
-        # Trova lo step e swappa
-        flat_idx = 0
-        for i, item in enumerate(self.steps):
+        # Usa approccio ricorsivo per trovare e spostare
+        result = self._move_item_up_recursive(self.steps, idx, 0)
+        
+        if result['moved']:
+            self._refresh_steps_list()
+            self.steps_listbox.selection_set(result['new_idx'])
+            self.steps_listbox.see(result['new_idx'])
+    
+    def _move_item_up_recursive(self, items_list, target_idx, current_flat_idx):
+        """
+        Trova e sposta ricorsivamente un item verso l'alto.
+        Returns: {'moved': bool, 'new_idx': int, 'flat_idx': int}
+        """
+        for i, item in enumerate(items_list):
             if isinstance(item, RepeatBlock):
-                if flat_idx == idx and i > 0:
-                    self.steps[i], self.steps[i-1] = self.steps[i-1], self.steps[i]
-                    self._refresh_steps_list()
-                    self.steps_listbox.selection_set(idx - 1)
-                    return
-                flat_idx += 1
+                # Check header del repeat
+                if current_flat_idx == target_idx:
+                    if i > 0:
+                        # Swappa con precedente
+                        prev_item = items_list[i-1]
+                        items_list[i], items_list[i-1] = items_list[i-1], items_list[i]
+                        new_idx = target_idx - self._count_listbox_rows(prev_item)
+                        return {'moved': True, 'new_idx': new_idx, 'flat_idx': current_flat_idx}
+                    else:
+                        return {'moved': False, 'new_idx': target_idx, 'flat_idx': current_flat_idx}
                 
-                for j, step in enumerate(item.steps):
-                    if flat_idx == idx and j > 0:
-                        item.steps[j], item.steps[j-1] = item.steps[j-1], item.steps[j]
-                        self._refresh_steps_list()
-                        self.steps_listbox.selection_set(idx - 1)
-                        return
-                    flat_idx += 1
+                current_flat_idx += 1
+                
+                # Ricorsione negli step del repeat
+                result = self._move_item_up_recursive(item.steps, target_idx, current_flat_idx)
+                if result['moved']:
+                    return result
+                current_flat_idx = result['flat_idx']
+                
             else:
-                if flat_idx == idx and i > 0:
-                    self.steps[i], self.steps[i-1] = self.steps[i-1], self.steps[i]
-                    self._refresh_steps_list()
-                    self.steps_listbox.selection_set(idx - 1)
-                    return
-                flat_idx += 1
+                # Step normale
+                if current_flat_idx == target_idx:
+                    if i > 0:
+                        # Swappa con precedente
+                        prev_item = items_list[i-1]
+                        items_list[i], items_list[i-1] = items_list[i-1], items_list[i]
+                        new_idx = target_idx - self._count_listbox_rows(prev_item)
+                        return {'moved': True, 'new_idx': new_idx, 'flat_idx': current_flat_idx}
+                    else:
+                        return {'moved': False, 'new_idx': target_idx, 'flat_idx': current_flat_idx}
+                
+                current_flat_idx += 1
+        
+        return {'moved': False, 'new_idx': target_idx, 'flat_idx': current_flat_idx}
     
     def _move_step_down(self):
         """Sposta lo step selezionato in giù."""
@@ -622,31 +701,55 @@ class VisualWorkoutBuilder(tk.Toplevel):
         
         idx = selection[0]
         
-        # Trova lo step e swappa
-        flat_idx = 0
-        for i, item in enumerate(self.steps):
+        # Usa approccio ricorsivo per trovare e spostare
+        result = self._move_item_down_recursive(self.steps, idx, 0)
+        
+        if result['moved']:
+            self._refresh_steps_list()
+            self.steps_listbox.selection_set(result['new_idx'])
+            self.steps_listbox.see(result['new_idx'])
+    
+    def _move_item_down_recursive(self, items_list, target_idx, current_flat_idx):
+        """
+        Trova e sposta ricorsivamente un item verso il basso.
+        Returns: {'moved': bool, 'new_idx': int, 'flat_idx': int}
+        """
+        for i, item in enumerate(items_list):
             if isinstance(item, RepeatBlock):
-                if flat_idx == idx and i < len(self.steps) - 1:
-                    self.steps[i], self.steps[i+1] = self.steps[i+1], self.steps[i]
-                    self._refresh_steps_list()
-                    self.steps_listbox.selection_set(idx + 1)
-                    return
-                flat_idx += 1
+                # Check header del repeat
+                if current_flat_idx == target_idx:
+                    if i < len(items_list) - 1:
+                        # Swappa con successivo
+                        next_item = items_list[i+1]
+                        items_list[i], items_list[i+1] = items_list[i+1], items_list[i]
+                        new_idx = target_idx + self._count_listbox_rows(next_item)
+                        return {'moved': True, 'new_idx': new_idx, 'flat_idx': current_flat_idx}
+                    else:
+                        return {'moved': False, 'new_idx': target_idx, 'flat_idx': current_flat_idx}
                 
-                for j, step in enumerate(item.steps):
-                    if flat_idx == idx and j < len(item.steps) - 1:
-                        item.steps[j], item.steps[j+1] = item.steps[j+1], item.steps[j]
-                        self._refresh_steps_list()
-                        self.steps_listbox.selection_set(idx + 1)
-                        return
-                    flat_idx += 1
+                current_flat_idx += 1
+                
+                # Ricorsione negli step del repeat
+                result = self._move_item_down_recursive(item.steps, target_idx, current_flat_idx)
+                if result['moved']:
+                    return result
+                current_flat_idx = result['flat_idx']
+                
             else:
-                if flat_idx == idx and i < len(self.steps) - 1:
-                    self.steps[i], self.steps[i+1] = self.steps[i+1], self.steps[i]
-                    self._refresh_steps_list()
-                    self.steps_listbox.selection_set(idx + 1)
-                    return
-                flat_idx += 1
+                # Step normale
+                if current_flat_idx == target_idx:
+                    if i < len(items_list) - 1:
+                        # Swappa con successivo
+                        next_item = items_list[i+1]
+                        items_list[i], items_list[i+1] = items_list[i+1], items_list[i]
+                        new_idx = target_idx + self._count_listbox_rows(next_item)
+                        return {'moved': True, 'new_idx': new_idx, 'flat_idx': current_flat_idx}
+                    else:
+                        return {'moved': False, 'new_idx': target_idx, 'flat_idx': current_flat_idx}
+                
+                current_flat_idx += 1
+        
+        return {'moved': False, 'new_idx': target_idx, 'flat_idx': current_flat_idx}
     
     def _increase_indent(self):
         """Aumenta l'indentazione dello step selezionato."""
@@ -656,31 +759,12 @@ class VisualWorkoutBuilder(tk.Toplevel):
         
         idx = selection[0]
         
-        # Trova lo step e aumenta indent
-        flat_idx = 0
-        for item in self.steps:
-            if isinstance(item, RepeatBlock):
-                if flat_idx == idx:
-                    item.indent += 1
-                    self._refresh_steps_list()
-                    self.steps_listbox.selection_set(idx)
-                    return
-                flat_idx += 1
-                
-                for step in item.steps:
-                    if flat_idx == idx:
-                        step.indent += 1
-                        self._refresh_steps_list()
-                        self.steps_listbox.selection_set(idx)
-                        return
-                    flat_idx += 1
-            else:
-                if flat_idx == idx:
-                    item.indent += 1
-                    self._refresh_steps_list()
-                    self.steps_listbox.selection_set(idx)
-                    return
-                flat_idx += 1
+        # Usa approccio ricorsivo
+        result = self._change_indent_recursive(self.steps, idx, 0, +1)
+        
+        if result['changed']:
+            self._refresh_steps_list()
+            self.steps_listbox.selection_set(idx)
     
     def _decrease_indent(self):
         """Riduce l'indentazione dello step selezionato."""
@@ -690,31 +774,47 @@ class VisualWorkoutBuilder(tk.Toplevel):
         
         idx = selection[0]
         
-        # Trova lo step e riduci indent
-        flat_idx = 0
-        for item in self.steps:
+        # Usa approccio ricorsivo
+        result = self._change_indent_recursive(self.steps, idx, 0, -1)
+        
+        if result['changed']:
+            self._refresh_steps_list()
+            self.steps_listbox.selection_set(idx)
+    
+    def _change_indent_recursive(self, items_list, target_idx, current_flat_idx, delta):
+        """
+        Trova ricorsivamente un item e cambia il suo indent.
+        delta: +1 per aumentare, -1 per diminuire
+        Returns: {'changed': bool, 'flat_idx': int}
+        """
+        for item in items_list:
             if isinstance(item, RepeatBlock):
-                if flat_idx == idx and item.indent > 0:
-                    item.indent -= 1
-                    self._refresh_steps_list()
-                    self.steps_listbox.selection_set(idx)
-                    return
-                flat_idx += 1
+                # Check header del repeat
+                if current_flat_idx == target_idx:
+                    if delta > 0 or item.indent > 0:
+                        item.indent += delta
+                        return {'changed': True, 'flat_idx': current_flat_idx}
+                    return {'changed': False, 'flat_idx': current_flat_idx}
                 
-                for step in item.steps:
-                    if flat_idx == idx and step.indent > 0:
-                        step.indent -= 1
-                        self._refresh_steps_list()
-                        self.steps_listbox.selection_set(idx)
-                        return
-                    flat_idx += 1
+                current_flat_idx += 1
+                
+                # Ricorsione negli step del repeat
+                result = self._change_indent_recursive(item.steps, target_idx, current_flat_idx, delta)
+                if result['changed']:
+                    return result
+                current_flat_idx = result['flat_idx']
+                
             else:
-                if flat_idx == idx and item.indent > 0:
-                    item.indent -= 1
-                    self._refresh_steps_list()
-                    self.steps_listbox.selection_set(idx)
-                    return
-                flat_idx += 1
+                # Step normale
+                if current_flat_idx == target_idx:
+                    if delta > 0 or item.indent > 0:
+                        item.indent += delta
+                        return {'changed': True, 'flat_idx': current_flat_idx}
+                    return {'changed': False, 'flat_idx': current_flat_idx}
+                
+                current_flat_idx += 1
+        
+        return {'changed': False, 'flat_idx': current_flat_idx}
     
     def _load_from_dsl(self, dsl_text: str):
         """Carica un workout da DSL esistente."""
@@ -931,6 +1031,130 @@ class LoadingDialog:
 
 
 # ============================================================================
+# NEW WORKOUT DIALOG
+# ============================================================================
+
+class NewWorkoutDialog(tk.Toplevel):
+    """Dialog per creare un nuovo workout."""
+    
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Nuovo Workout")
+        self.geometry("450x300")
+        
+        self.result = None
+        
+        self._build_ui()
+        
+        # Centra
+        self.transient(parent)
+        self.grab_set()
+        
+        # Centra rispetto al parent
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
+        self.geometry(f"+{x}+{y}")
+    
+    def _build_ui(self):
+        """Costruisce l'interfaccia."""
+        frame = ttk.Frame(self, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Week
+        ttk.Label(frame, text="Week:").grid(row=0, column=0, sticky="w", pady=8)
+        self.entry_week = ttk.Entry(frame, width=10)
+        self.entry_week.grid(row=0, column=1, sticky="w", pady=8)
+        self.entry_week.insert(0, "1")
+        
+        # Date
+        ttk.Label(frame, text="Date (YYYY-MM-DD):").grid(row=1, column=0, sticky="w", pady=8)
+        self.entry_date = ttk.Entry(frame, width=25)
+        self.entry_date.grid(row=1, column=1, sticky="we", pady=8)
+        
+        # Data di default: oggi
+        from datetime import date
+        today = date.today().isoformat()
+        self.entry_date.insert(0, today)
+        
+        ttk.Label(frame, text="(es: 2025-05-15)", font=("", 8), foreground="gray").grid(
+            row=1, column=2, sticky="w", padx=(5, 0)
+        )
+        
+        # Session
+        ttk.Label(frame, text="Session:").grid(row=2, column=0, sticky="w", pady=8)
+        self.entry_session = ttk.Entry(frame, width=10)
+        self.entry_session.grid(row=2, column=1, sticky="w", pady=8)
+        self.entry_session.insert(0, "1")
+        
+        # Sport
+        ttk.Label(frame, text="Sport:").grid(row=3, column=0, sticky="w", pady=8)
+        self.sport_var = tk.StringVar(value="Running")
+        sport_combo = ttk.Combobox(
+            frame,
+            textvariable=self.sport_var,
+            values=["Running", "Cycling", "Swimming"],
+            state="readonly",
+            width=22
+        )
+        sport_combo.grid(row=3, column=1, sticky="w", pady=8)
+        
+        # Description
+        ttk.Label(frame, text="Description:").grid(row=4, column=0, sticky="nw", pady=8)
+        self.entry_description = tk.Text(frame, width=30, height=3)
+        self.entry_description.grid(row=4, column=1, columnspan=2, sticky="we", pady=8)
+        self.entry_description.insert("1.0", "Nuovo allenamento")
+        
+        frame.columnconfigure(1, weight=1)
+        
+        # Buttons
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        
+        ttk.Button(btn_frame, text="✅ Crea", command=self._create).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_frame, text="❌ Annulla", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+    
+    def _create(self):
+        """Crea il workout."""
+        # Validazione
+        week_str = self.entry_week.get().strip()
+        date_str = self.entry_date.get().strip()
+        session_str = self.entry_session.get().strip()
+        sport = self.sport_var.get()
+        description = self.entry_description.get("1.0", tk.END).strip()
+        
+        if not date_str:
+            messagebox.showerror("Errore", "Inserisci una data.", parent=self)
+            return
+        
+        # Valida formato data
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            messagebox.showerror(
+                "Errore",
+                "Formato data non valido.\nUsa: YYYY-MM-DD (es: 2025-05-15)",
+                parent=self
+            )
+            return
+        
+        if not description:
+            messagebox.showerror("Errore", "Inserisci una descrizione.", parent=self)
+            return
+        
+        # Salva risultato
+        self.result = {
+            "week": int(week_str) if week_str else 1,
+            "date": date_str,
+            "session": int(session_str) if session_str else 1,
+            "sport": sport,
+            "description": description
+        }
+        
+        self.destroy()
+
+
+# ============================================================================
 # MAIN GUI (versione avanzata)
 # ============================================================================
 
@@ -959,6 +1183,8 @@ class TrainingPlannerAdvancedGUI:
         ttk.Button(toolbar, text="📄 Genera Excel", command=self._generate_excel).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="📁 Carica Excel", command=self._load_excel).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="💾 Salva Excel", command=self._save_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+        ttk.Button(toolbar, text="➕ Nuovo Workout", command=self._create_new_workout).pack(side=tk.LEFT, padx=2)
         
         self.lbl_file = ttk.Label(toolbar, text="Nessun file caricato")
         self.lbl_file.pack(side=tk.LEFT, padx=10)
@@ -1090,7 +1316,10 @@ class TrainingPlannerAdvancedGUI:
         self.text_steps_dsl.pack(fill=tk.BOTH, expand=True)
         
         btn_save = ttk.Button(dsl_frame, text="💾 Salva Modifiche", command=self._save_workout_changes)
-        btn_save.pack(pady=5)
+        btn_save.pack(side=tk.LEFT, pady=5, padx=2)
+        
+        btn_delete = ttk.Button(dsl_frame, text="🗑️ Elimina Workout", command=self._delete_workout_from_list)
+        btn_delete.pack(side=tk.LEFT, pady=5, padx=2)
         
         # Tab: Parameters
         params_frame = ttk.Frame(notebook, padding=5)
@@ -1116,6 +1345,63 @@ class TrainingPlannerAdvancedGUI:
         ttk.Button(params_frame, text="✏️ Modifica", command=self._edit_parameter).pack(pady=5)
     
     # ========== Excel Operations ==========
+    
+    def _create_new_workout(self):
+        """Crea un nuovo workout e lo aggiunge all'Excel."""
+        if self.df_workouts is None:
+            messagebox.showerror("Errore", "Devi prima caricare o generare un file Excel.")
+            return
+        
+        # Dialog per i dettagli del nuovo workout
+        dialog = NewWorkoutDialog(self.root)
+        self.root.wait_window(dialog)
+        
+        if not dialog.result:
+            return  # Utente ha annullato
+        
+        # Crea nuova riga
+        new_row = {
+            "Week": dialog.result["week"],
+            "Date": dialog.result["date"],
+            "Session": dialog.result["session"],
+            "Sport": dialog.result["sport"],
+            "Description": dialog.result["description"],
+            "Steps": "",  # Vuoto, verrà compilato con il visual builder
+            "WorkoutId": "",
+            "ScheduledDate": "",
+        }
+        
+        # Aggiungi WorkoutScheduleId se presente nel DataFrame
+        if "WorkoutScheduleId" in self.df_workouts.columns:
+            new_row["WorkoutScheduleId"] = ""
+        
+        # Aggiungi al DataFrame usando pd.concat invece di append
+        new_row_df = pd.DataFrame([new_row])
+        self.df_workouts = pd.concat([self.df_workouts, new_row_df], ignore_index=True)
+        
+        # Aggiorna la tree view
+        self._populate_workouts_tree()
+        
+        # Seleziona il nuovo workout
+        new_idx = len(self.df_workouts) - 1
+        self.tree_workouts.selection_set(str(new_idx))
+        self.tree_workouts.see(str(new_idx))
+        
+        # Trigger l'evento di selezione per popolare i campi
+        self._on_select_workout()
+        
+        # Autosave
+        self._autosave()
+        
+        # Messaggio con opzione di aprire subito il builder
+        if messagebox.askyesno(
+            "Workout Creato",
+            f"Nuovo workout creato!\n\n"
+            f"Vuoi aprire subito il Visual Builder\n"
+            f"per definire gli step del workout?",
+            icon='question'
+        ):
+            self._open_visual_builder()
     
     def _generate_excel(self):
         """Genera file Excel di esempio."""
@@ -1392,6 +1678,7 @@ class TrainingPlannerAdvancedGUI:
         
         # Callback per salvare
         def save_callback(new_dsl: str):
+            # Aggiorna i campi di testo
             self.text_steps_dsl.delete("1.0", tk.END)
             self.text_steps_dsl.insert("1.0", new_dsl)
             
@@ -1399,6 +1686,24 @@ class TrainingPlannerAdvancedGUI:
             self.text_steps_preview.delete("1.0", tk.END)
             self.text_steps_preview.insert("1.0", new_dsl)
             self.text_steps_preview.config(state=tk.DISABLED)
+            
+            # 🔥 SALVA AUTOMATICAMENTE NEL DATAFRAME
+            sel = self.tree_workouts.selection()
+            if sel and self.df_workouts is not None:
+                for iid in sel:
+                    idx = int(iid)
+                    self.df_workouts.at[idx, "Steps"] = new_dsl
+                
+                # Autosave su file
+                self._autosave()
+                
+                # Notifica visiva
+                messagebox.showinfo(
+                    "✅ Salvato",
+                    "Workout salvato automaticamente!\n\n"
+                    "Gli step sono stati aggiornati nell'Excel.",
+                    parent=self.root
+                )
         
         # Apri builder
         builder = VisualWorkoutBuilder(self.root, initial_dsl=current_dsl, callback=save_callback)
@@ -1444,6 +1749,47 @@ class TrainingPlannerAdvancedGUI:
         
         self._autosave()
         messagebox.showinfo("OK", "Workout aggiornato!")
+    
+    def _delete_workout_from_list(self):
+        """Elimina il workout selezionato dalla lista Excel (non da Garmin)."""
+        if self.df_workouts is None:
+            return
+        
+        sel = self.tree_workouts.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un workout da eliminare.")
+            return
+        
+        # Conferma
+        if not messagebox.askyesno(
+            "Conferma Eliminazione",
+            "Vuoi eliminare questo workout dalla lista Excel?\n\n"
+            "Nota: se il workout è già caricato su Garmin,\n"
+            "dovrai cancellarlo separatamente con il bottone '🗑 Cancella'."
+        ):
+            return
+        
+        # Elimina tutte le righe selezionate
+        indices_to_delete = sorted([int(iid) for iid in sel], reverse=True)
+        
+        for idx in indices_to_delete:
+            self.df_workouts = self.df_workouts.drop(idx).reset_index(drop=True)
+        
+        # Aggiorna tree e autosave
+        self._populate_workouts_tree()
+        self._autosave()
+        
+        # Clear campi editor
+        self.entry_week.delete(0, tk.END)
+        self.entry_date.delete(0, tk.END)
+        self.entry_session.delete(0, tk.END)
+        self.entry_description.delete(0, tk.END)
+        self.text_steps_dsl.delete("1.0", tk.END)
+        self.text_steps_preview.config(state=tk.NORMAL)
+        self.text_steps_preview.delete("1.0", tk.END)
+        self.text_steps_preview.config(state=tk.DISABLED)
+        
+        messagebox.showinfo("OK", f"Eliminati {len(indices_to_delete)} workout dalla lista!")
     
     # ========== Parameters ==========
     
