@@ -334,6 +334,7 @@ Uso personale - © 2025 Francesco
 4. **HR_max**: Personalizza in Parameters per zone FC corrette
 5. **Toleranze**: Si applicano solo a valori singoli, non ai range
 6. **Excel aperto**: Chiudi il file Excel prima di salvare dalla GUI
+7. **Creazione EXE**: Per generare il file .exe usare il comando : python -m PyInstaller --clean training_planner_gui.spec
 
 ## 🆘 Troubleshooting
 
