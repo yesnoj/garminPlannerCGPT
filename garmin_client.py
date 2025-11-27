@@ -166,3 +166,72 @@ def remove_workout(workout_id: str, date: str) -> Any:
         Response object
     """
     return remove_workout_schedule(workout_id, date)
+
+
+def delete_workout_definition(workout_id: str) -> Any:
+    """
+    Cancella definitivamente un workout dalla libreria allenamenti di Garmin Connect.
+
+    Usa l'endpoint:
+    DELETE https://connectapi.garmin.com/workout-service/workout/{workoutId}
+
+    Args:
+        workout_id: ID del workout da cancellare
+
+    Returns:
+        Response object oppure dict, a seconda di garth.connectapi
+
+    Raises:
+        RuntimeError: se la richiesta fallisce
+    """
+    url = f"{_WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
+
+    print(f"🗑️ Cancellazione DEFINITIVA workout {workout_id}...")
+    print(f"   URL (relative): {url}")
+    print("   Host: connectapi.garmin.com (via garth.connectapi)")
+    print("   Method: DELETE")
+
+    try:
+        response = garth.connectapi(url, method="DELETE")
+
+        status_code = getattr(response, "status_code", None)
+
+        if status_code is None:
+            print("✅ Workout cancellato (nessun status_code, nessuna eccezione)")
+            return response
+
+        if status_code in (200, 204):
+            print(f"✅ SUCCESS! Workout cancellato (Status {status_code})")
+            return response
+
+        print(f"⚠️  Status {status_code}")
+        if hasattr(response, "raise_for_status"):
+            response.raise_for_status()
+        else:
+            raise RuntimeError(f"Status code inatteso: {status_code}")
+
+    except Exception as e:
+        msg = str(e)
+        if "403" in msg:
+            raise RuntimeError(
+                "Errore 403 Forbidden nella cancellazione workout.\n"
+                "Probabile problema di permessi / sessione.\n\n"
+                f"WorkoutId: {workout_id}\nDettagli: {e}"
+            )
+        elif "401" in msg:
+            raise RuntimeError(
+                "Errore 401 Unauthorized nella cancellazione workout.\n"
+                "Rifai il login con garth.login() e riprova.\n\n"
+                f"WorkoutId: {workout_id}\nDettagli: {e}"
+            )
+        elif "404" in msg:
+            raise RuntimeError(
+                "Errore 404 Not Found nella cancellazione workout.\n"
+                "Il workout potrebbe essere già stato cancellato manualmente.\n\n"
+                f"WorkoutId: {workout_id}\nDettagli: {e}"
+            )
+        else:
+            raise RuntimeError(
+                "Errore generico nella cancellazione workout.\n"
+                f"WorkoutId: {workout_id}\nDettagli: {e}"
+            )

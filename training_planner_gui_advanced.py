@@ -9,6 +9,12 @@ import json
 from datetime import datetime
 import threading
 from typing import Optional, List, Dict, Any
+try:
+    from tkcalendar import DateEntry
+    HAS_CALENDAR = True
+except ImportError:
+    HAS_CALENDAR = False
+
 
 from excel_utils import generate_training_excel, format_workbook_dates_and_steps
 from dsl_parser import expand_repeat_lines, build_garmin_workout_from_excel_row
@@ -1282,17 +1288,58 @@ class TrainingPlannerAdvancedGUI:
         self.entry_week = ttk.Entry(meta_frame, width=5)
         self.entry_week.grid(row=0, column=1, sticky="w", padx=(0, 10))
         
-        ttk.Label(meta_frame, text="Date:").grid(row=0, column=2, sticky="w")
-        self.entry_date = ttk.Entry(meta_frame, width=12)
-        self.entry_date.grid(row=0, column=3, sticky="w", padx=(0, 10))
-        
-        ttk.Label(meta_frame, text="Session:").grid(row=0, column=4, sticky="w")
+        ttk.Label(meta_frame, text="Session:").grid(row=0, column=2, sticky="w")
         self.entry_session = ttk.Entry(meta_frame, width=5)
-        self.entry_session.grid(row=0, column=5, sticky="w")
+        self.entry_session.grid(row=0, column=3, sticky="w", padx=(0, 10))
+        
+        ttk.Label(meta_frame, text="Date:").grid(row=0, column=4, sticky="w")
+        
+        # Frame per Date + bottone calendario
+        date_frame = ttk.Frame(meta_frame)
+        date_frame.grid(row=0, column=5, sticky="w")
+        
+        # Date picker
+        if HAS_CALENDAR:
+            self.entry_date = DateEntry(
+                date_frame,
+                width=12,
+                background='darkblue',
+                foreground='white',
+                borderwidth=2,
+                date_pattern='yyyy-mm-dd',
+                showweeknumbers=False
+            )
+            self.entry_date.pack(side=tk.LEFT)
+            
+            # Bottone per aprire calendario
+            btn_cal = ttk.Button(date_frame, text="📅", width=3,
+                                command=lambda: self.entry_date.drop_down())
+            btn_cal.pack(side=tk.LEFT, padx=(2, 0))
+        else:
+            self.entry_date = ttk.Entry(date_frame, width=12)
+            self.entry_date.pack(side=tk.LEFT)
         
         ttk.Label(visual_frame, text="Description:").pack(anchor="w")
         self.entry_description = ttk.Entry(visual_frame)
         self.entry_description.pack(fill=tk.X, pady=(0, 5))
+
+        # Bottoni Salva/Elimina (visibili anche in Editor Visuale)
+        btn_frame_visual = ttk.Frame(visual_frame)
+        btn_frame_visual.pack(fill=tk.X, pady=5)
+        
+        btn_save_visual = ttk.Button(
+            btn_frame_visual,
+            text="💾 Salva Modifiche",
+            command=self._save_workout_changes
+        )
+        btn_save_visual.pack(side=tk.LEFT, padx=2)
+        
+        btn_delete_visual = ttk.Button(
+            btn_frame_visual,
+            text="🗑️ Elimina Workout",
+            command=self._delete_workout_from_list
+        )
+        btn_delete_visual.pack(side=tk.LEFT, padx=2)
         
         # Visual builder button
         btn_visual = ttk.Button(
@@ -2168,6 +2215,10 @@ class TrainingPlannerAdvancedGUI:
 
 def main():
     root = tk.Tk()
+    
+    # Dimensioni finestra
+    root.geometry("1400x800")
+    root.minsize(1200, 700)
     app = TrainingPlannerAdvancedGUI(root)
     root.mainloop()
 

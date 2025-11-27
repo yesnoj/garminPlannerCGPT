@@ -5,6 +5,12 @@ import json
 from datetime import datetime
 import threading
 
+try:
+    from tkcalendar import DateEntry
+    HAS_CALENDAR = True
+except ImportError:
+    HAS_CALENDAR = False
+
 from excel_utils import generate_training_excel, format_workbook_dates_and_steps
 from dsl_parser import expand_repeat_lines, build_garmin_workout_from_excel_row
 from garmin_service import GarminService
@@ -84,7 +90,7 @@ class TrainingPlannerGUI:
         btn_load = ttk.Button(top_frame, text="Carica Excel", command=self.load_excel)
         btn_load.pack(side=tk.LEFT, padx=5)
 
-        btn_save = ttk.Button(top_frame, text="Salva Excel", command=self.save_excel)
+        btn_save = ttk.Button(top_frame, text="💾 Salva Excel", command=self.save_excel)
         btn_save.pack(side=tk.LEFT, padx=5)
 
         self.lbl_file = ttk.Label(top_frame, text="Nessun file caricato")
@@ -274,8 +280,31 @@ class TrainingPlannerGUI:
         self.entry_session.grid(row=0, column=3, sticky="w", padx=(0, 10))
 
         ttk.Label(meta_frame, text="Date (YYYY-MM-DD):").grid(row=0, column=4, sticky="w")
-        self.entry_date = ttk.Entry(meta_frame, width=12)
-        self.entry_date.grid(row=0, column=5, sticky="w", padx=(0, 10))
+        
+        # Frame per Date + bottone calendario
+        date_frame = ttk.Frame(meta_frame)
+        date_frame.grid(row=0, column=5, sticky="w")
+        
+        # Date picker
+        if HAS_CALENDAR:
+            self.entry_date = DateEntry(
+                date_frame,
+                width=12,
+                background='darkblue',
+                foreground='white',
+                borderwidth=2,
+                date_pattern='yyyy-mm-dd',
+                showweeknumbers=False
+            )
+            self.entry_date.pack(side=tk.LEFT)
+            
+            # Bottone per aprire calendario
+            btn_cal = ttk.Button(date_frame, text="📅", width=3, 
+                                command=lambda: self.entry_date.drop_down())
+            btn_cal.pack(side=tk.LEFT, padx=(2, 0))
+        else:
+            self.entry_date = ttk.Entry(date_frame, width=12)
+            self.entry_date.pack(side=tk.LEFT)
 
         ttk.Label(steps_frame, text="Description:").pack(anchor="w")
         self.entry_description = ttk.Entry(steps_frame)
@@ -288,7 +317,7 @@ class TrainingPlannerGUI:
         btn_frame = ttk.Frame(steps_frame)
         btn_frame.pack(fill=tk.X, pady=3)
 
-        btn_save_workout = ttk.Button(btn_frame, text="Salva modifiche workout", command=self.update_workout_row)
+        btn_save_workout = ttk.Button(btn_frame, text="💾 Salva modifiche workout", command=self.update_workout_row)
         btn_save_workout.pack(side=tk.LEFT)
 
         btn_show_json = ttk.Button(btn_frame, text="Mostra JSON steps espanso", command=self.show_steps_json)
@@ -323,7 +352,7 @@ class TrainingPlannerGUI:
         params_btn_frame = ttk.Frame(params_frame)
         params_btn_frame.pack(fill=tk.X, pady=5)
 
-        btn_edit_param = ttk.Button(params_btn_frame, text="Modifica parametro", command=self.edit_selected_parameter)
+        btn_edit_param = ttk.Button(params_btn_frame, text="✏️ Modifica parametro", command=self.edit_selected_parameter)
         btn_edit_param.pack(side=tk.LEFT)
 
     # ---------- Excel ----------
@@ -353,7 +382,7 @@ class TrainingPlannerGUI:
             self.df_workouts = pd.read_excel(path, sheet_name="Workouts")
 
             try:
-                # Ã°Å¸â€˜â€° forza tutte le colonne di Parameters a stringa
+                # ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â° forza tutte le colonne di Parameters a stringa
                 self.df_parameters = pd.read_excel(
                     path,
                     sheet_name="Parameters",
@@ -474,7 +503,7 @@ class TrainingPlannerGUI:
             messagebox.showwarning(
                 "Autosalvataggio fallito",
                 f"Non riesco a salvare su:\n{self.excel_path}\n\nDettagli:\n{e}\n\n"
-                "Chiudi il file in Excel (se ÃƒÆ’Ã‚Â¨ aperto) e prova a salvare manualmente."
+                "Chiudi il file in Excel (se ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ aperto) e prova a salvare manualmente."
             )
 
     def populate_workouts_tree(self):
@@ -898,7 +927,7 @@ class TrainingPlannerGUI:
                     ).strip()
 
                     if not workout_id:
-                        print(f"âš ï¸ Workout creato (riga {idx}) ma nessun 'workoutId' nella risposta.")
+                        print(f"Ã¢Å¡Â Ã¯Â¸Â Workout creato (riga {idx}) ma nessun 'workoutId' nella risposta.")
                         continue
 
                     self.df_workouts.at[idx, "WorkoutId"] = workout_id
@@ -922,7 +951,7 @@ class TrainingPlannerGUI:
                 if schedule_id:
                     self.df_workouts.at[idx, "WorkoutScheduleId"] = schedule_id
                 else:
-                    print("âš ï¸ Nessun workoutScheduleId nella risposta:", resp_sched)
+                    print("Ã¢Å¡Â Ã¯Â¸Â Nessun workoutScheduleId nella risposta:", resp_sched)
 
                 self.df_workouts.at[idx, "ScheduledDate"] = date_str
                 self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
@@ -977,7 +1006,7 @@ class TrainingPlannerGUI:
                         error_msg = (
                             f"Garmin ha risposto 403 Forbidden nel tentativo di rimuovere "
                             f"la pianificazione (scheduleId {schedule_id}, {sched_date}).\n\n"
-                            f"Questo significa che l'API usata non Ã¨ autorizzata "
+                            f"Questo significa che l'API usata non ÃƒÂ¨ autorizzata "
                             f"a cancellare la programmazione. Per questo allenamento dovrai "
                             f"rimuovere la pianificazione manualmente da Garmin Connect.\n\n"
                             f"Dettagli tecnici:\n{msg}"
@@ -991,7 +1020,7 @@ class TrainingPlannerGUI:
                 self.root.after(0, self.autosave_to_loaded_excel)
                 return True, f"Rimossi {removed} workout dalla programmazione."
             else:
-                msg = ("Nessun workout Ã¨ stato rimosso.\n"
+                msg = ("Nessun workout ÃƒÂ¨ stato rimosso.\n"
                        "Verifica che le righe selezionate abbiano sia ScheduledDate sia WorkoutScheduleId compilati.")
                 return True, msg
         
@@ -1017,7 +1046,7 @@ class TrainingPlannerGUI:
         # Conferma utente (operazione distruttiva)
         confirm_msg = (
             "Vuoi cancellare DEFINITIVAMENTE i workout selezionati dalla libreria Garmin?\n"
-            "Se sono pianificati, verrÃ  prima rimossa la pianificazione."
+            "Se sono pianificati, verrÃƒÂ  prima rimossa la pianificazione."
         )
         if messagebox.askyesno("Conferma", confirm_msg) is False:
             return
@@ -1042,7 +1071,7 @@ class TrainingPlannerGUI:
                 if sched_date.lower() in ("nan", "<na>"):
                     sched_date = ""
 
-                # 1) se c'Ã¨ una pianificazione, prova a toglierla
+                # 1) se c'ÃƒÂ¨ una pianificazione, prova a toglierla
                 if schedule_id and sched_date:
                     try:
                         loading.update_message(f"Rimozione pianificazione workout {i}/{num_workouts}...")
@@ -1054,7 +1083,7 @@ class TrainingPlannerGUI:
                     except Exception as e:
                         # Non blocco la cancellazione del workout, ma avviso
                         print(
-                            f"âš ï¸ Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
+                            f"Ã¢Å¡Â Ã¯Â¸Â Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
                         )
 
                 # 2) cancella il workout dalla libreria
@@ -1074,7 +1103,7 @@ class TrainingPlannerGUI:
                 self.root.after(0, self.autosave_to_loaded_excel)
                 return True, f"Cancellati definitivamente {deleted} workout dalla libreria Garmin."
             else:
-                return True, "Nessun workout Ã¨ stato cancellato (nessun WorkoutId valido nelle righe selezionate)."
+                return True, "Nessun workout ÃƒÂ¨ stato cancellato (nessun WorkoutId valido nelle righe selezionate)."
         
         self._run_with_loading(operation, "Cancellazione workout da Garmin")
 
@@ -1082,6 +1111,11 @@ class TrainingPlannerGUI:
 
 def main():
     root = tk.Tk()
+    
+    # Dimensioni finestra più grandi
+    root.geometry("1400x800")  # Larghezza x Altezza
+    root.minsize(1200, 700)    # Dimensione minima
+    
     app = TrainingPlannerGUI(root)
     root.mainloop()
 
