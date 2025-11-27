@@ -269,13 +269,13 @@ class TrainingPlannerGUI:
         self.entry_week = ttk.Entry(meta_frame, width=5)
         self.entry_week.grid(row=0, column=1, sticky="w", padx=(0, 10))
 
-        ttk.Label(meta_frame, text="Date (YYYY-MM-DD):").grid(row=0, column=2, sticky="w")
-        self.entry_date = ttk.Entry(meta_frame, width=12)
-        self.entry_date.grid(row=0, column=3, sticky="w", padx=(0, 10))
-
-        ttk.Label(meta_frame, text="Session:").grid(row=0, column=4, sticky="w")
+        ttk.Label(meta_frame, text="Session:").grid(row=0, column=2, sticky="w")
         self.entry_session = ttk.Entry(meta_frame, width=5)
-        self.entry_session.grid(row=0, column=5, sticky="w", padx=(0, 10))
+        self.entry_session.grid(row=0, column=3, sticky="w", padx=(0, 10))
+
+        ttk.Label(meta_frame, text="Date (YYYY-MM-DD):").grid(row=0, column=4, sticky="w")
+        self.entry_date = ttk.Entry(meta_frame, width=12)
+        self.entry_date.grid(row=0, column=5, sticky="w", padx=(0, 10))
 
         ttk.Label(steps_frame, text="Description:").pack(anchor="w")
         self.entry_description = ttk.Entry(steps_frame)
