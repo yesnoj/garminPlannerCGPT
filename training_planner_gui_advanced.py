@@ -284,7 +284,7 @@ class VisualWorkoutBuilder(tk.Toplevel):
     def __init__(self, parent, initial_dsl: str = "", callback=None):
         super().__init__(parent)
         self.title("Visual Workout Builder")
-        self.geometry("1300x700")
+        self.geometry("1300x800")
         
         self.callback = callback  # Funzione da chiamare al salvataggio
         self.steps: List[Any] = []  # Lista di WorkoutStep e RepeatBlock
