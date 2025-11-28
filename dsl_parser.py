@@ -75,7 +75,7 @@ def parse_duration_part(base_str: str) -> Tuple[str, Optional[float], Optional[s
     Parsea la parte prima di '@' per ricavare:
       - tipo condizione ('time' o 'distance' o 'lap.button')
       - valore numerico (secondi o metri)
-      - unitÃ  preferita
+      - unitÃƒÂ  preferita
     """
     s = base_str.strip().lower()
 
@@ -101,7 +101,7 @@ def parse_duration_part(base_str: str) -> Tuple[str, Optional[float], Optional[s
 
     # ORA i tempi
     # Minuti: "10min", "10 min", "40'", "35 '"
-    m = re.match(r"^(\d+)\s*(?:min|'|â€²)(?:\s|$)", s)
+    m = re.match(r"^(\d+)\s*(?:min|'|Ã¢â‚¬Â²)(?:\s|$)", s)
     if m:
         minutes = int(m.group(1))
         return "time", float(minutes * 60), None
@@ -301,6 +301,86 @@ def parse_hr_expression(expr: str, df_parameters: Optional[pd.DataFrame] = None)
     return (hr_value - tolerance, hr_value + tolerance)
 
 
+
+
+def parse_power_expression(expr: str) -> Tuple[float, Optional[float]]:
+    """
+    Parsea espressione potenza: '250W', '200-250W', '250'
+    Returns: (power1, power2) oppure (power, None) se singolo valore
+    """
+    expr = expr.strip().upper()
+    expr = expr.replace('W', '')
+    
+    if '-' in expr:
+        parts = expr.split('-')
+        if len(parts) == 2:
+            try:
+                return (float(parts[0]), float(parts[1]))
+            except ValueError:
+                pass
+    
+    try:
+        power = float(expr)
+        return (power, None)
+    except ValueError:
+        return (200.0, None)
+
+
+def parse_cadence_expression(expr: str) -> Tuple[float, Optional[float]]:
+    """
+    Parsea espressione cadenza: '90rpm', '85-95rpm', '90'
+    Returns: (cadence1, cadence2) oppure (cadence, None) se singolo valore
+    """
+    expr = expr.strip().lower()
+    expr = expr.replace('rpm', '')
+    
+    if '-' in expr:
+        parts = expr.split('-')
+        if len(parts) == 2:
+            try:
+                return (float(parts[0]), float(parts[1]))
+            except ValueError:
+                pass
+    
+    try:
+        cadence = float(expr)
+        return (cadence, None)
+    except ValueError:
+        return (80.0, None)
+
+
+def parse_swim_pace_expression(expr: str, df_parameters: Optional[pd.DataFrame] = None) -> Tuple[float, Optional[float]]:
+    """
+    Parsea espressione pace nuoto (min:sec per 100m): '1:45', '1:40-1:50'
+    Converte in m/s per API Garmin.
+    """
+    expr = expr.strip()
+    
+    # Range: "1:40-1:50"
+    if '-' in expr and ':' in expr:
+        parts = expr.split('-')
+        if len(parts) == 2:
+            pace1_sec = parse_single_pace(parts[0].strip())
+            pace2_sec = parse_single_pace(parts[1].strip())
+            mps1 = 100.0 / pace1_sec if pace1_sec > 0 else 1.0
+            mps2 = 100.0 / pace2_sec if pace2_sec > 0 else 1.0
+            return (min(mps1, mps2), max(mps1, mps2))
+    
+    # Singolo valore: "1:45"
+    if ':' in expr:
+        pace_sec = parse_single_pace(expr)
+        tolerance_param = get_parameter_value('swim_tolerance', df_parameters)
+        tolerance = float(tolerance_param) if tolerance_param else 5.0
+        
+        slower_sec = pace_sec + tolerance
+        faster_sec = pace_sec - tolerance
+        slower_mps = 100.0 / slower_sec if slower_sec > 0 else 1.0
+        faster_mps = 100.0 / faster_sec if faster_sec > 0 else 1.0
+        return (slower_mps, faster_mps)
+    
+    return (1.2, 1.4)
+
+
 # ------------------------------------------------------------
 # 5) Parse target
 # ------------------------------------------------------------
@@ -438,8 +518,67 @@ def parse_target(target_str: str, df_parameters: Optional[pd.DataFrame] = None) 
                 "zoneNumber": None
             }
     
+    # ========== MULTI-SPORT TARGETS ==========
+    
+    # Zone POTENZA: Power_Z1, Power_Z2, etc.
+    m = re.match(r"^power[_]?z(\d)$", s)
+    if m:
+        zone_num = m.group(1)
+        zone_key = f"Power_Z{zone_num}"
+        zone_expr = get_parameter_value(zone_key, df_parameters)
+        
+        if zone_expr:
+            power1, power2 = parse_power_expression(zone_expr)
+            if power2 is None:
+                # Singolo valore: aggiungi 5% tolleranza
+                power2 = power1 * 1.05
+            
+            return {
+                "targetType": {
+                    "workoutTargetTypeId": TARGET_TYPE_IDS['power.zone'],
+                    "workoutTargetTypeKey": "power.zone"
+                },
+                "targetValueOne": power1,
+                "targetValueTwo": power2,
+                "zoneNumber": None
+            }
+    
+    # Zone CADENZA: Cadence_Easy, Cadence_Tempo, Cadence_Sprint, etc.
+    if s.startswith('cadence'):
+        custom_cadence = get_parameter_value(s, df_parameters)
+        if custom_cadence:
+            cad1, cad2 = parse_cadence_expression(custom_cadence)
+            if cad2 is None:
+                cad2 = cad1 + 5  # Range di 5 rpm
+            
+            return {
+                "targetType": {
+                    "workoutTargetTypeId": TARGET_TYPE_IDS['cadence'],
+                    "workoutTargetTypeKey": "cadence"
+                },
+                "targetValueOne": cad1,
+                "targetValueTwo": cad2,
+                "zoneNumber": None
+            }
+    
+    # Zone SWIM PACE: Swim_Z1, Swim_Z2, swim_easy, swim_threshold, etc.
+    if s.startswith('swim'):
+        custom_swim = get_parameter_value(s, df_parameters)
+        if custom_swim:
+            mps1, mps2 = parse_swim_pace_expression(custom_swim, df_parameters)
+            
+            return {
+                "targetType": {
+                    "workoutTargetTypeId": TARGET_TYPE_IDS['pace.zone'],
+                    "workoutTargetTypeKey": "pace.zone"
+                },
+                "targetValueOne": mps1,
+                "targetValueTwo": mps2,
+                "zoneNumber": None
+            }
+    
     # NUOVO: Parametri custom di ritmo (recovery, marathon, threshold, easy_range, ecc.)
-    # Cerca qualsiasi parametro in Parameters che non sia giÃ  stato gestito
+    # Cerca qualsiasi parametro in Parameters che non sia giÃƒÆ’Ã‚Â  stato gestito
     custom_pace = get_parameter_value(s, df_parameters)
     if custom_pace:
         # Trovato un parametro custom, prova a parsarlo come ritmo
@@ -581,7 +720,7 @@ def parse_step_line(
         "zoneNumber": target_info["zoneNumber"],
     }
 
-    # Aggiungi endConditionValue solo se non Ã¨ lap.button
+    # Aggiungi endConditionValue solo se non ÃƒÂ¨ lap.button
     if end_condition_value is not None:
         step["endConditionValue"] = end_condition_value
     

@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 """
 Training Planner - MULTI-SPORT GUI con Editor Visuale
 Versione completa con supporto per Running, Cycling e Swimming.
@@ -17,8 +19,8 @@ except ImportError:
     HAS_CALENDAR = False
 
 
-from excel_utils_multisport import generate_training_excel_multisport, format_workbook_dates_and_steps
-from dsl_parser_multisport import expand_repeat_lines, build_garmin_workout_from_excel_row
+from excel_utils import generate_training_excel, format_workbook_dates_and_steps
+from dsl_parser import expand_repeat_lines, build_garmin_workout_from_excel_row
 from garmin_service import GarminService
 
 
@@ -108,11 +110,11 @@ PRESET_BLOCKS_BY_SPORT = {
             "target": "Power_Z5",
             "icon": "🚀"
         },
-        "🔄 3min @ Cadence_Sprint": {
+        "🔁 3min @ Cadence_Sprint": {
             "type": "interval",
             "duration": "3min",
             "target": "Cadence_Sprint",
-            "icon": "🔄"
+            "icon": "🔁"
         },
         "🧘 Recovery 4min Power_Z1": {
             "type": "recovery",
@@ -230,7 +232,7 @@ PRESET_REPEAT_BLOCKS_BY_SPORT = {
             "icon": "🔁",
             "description": "Running: Sprint molto brevi"
         },
-        "🔁🔁 2x [6x (1min Z5 + 1min rec) + 3min rest]": {
+        "🔁 2x [6x (1min Z5 + 1min rec) + 3min rest]": {
             "repetitions": 2,
             "steps": [
                 {
@@ -243,7 +245,7 @@ PRESET_REPEAT_BLOCKS_BY_SPORT = {
                 },
                 {"type": "rest", "duration": "3min", "target": ""}
             ],
-            "icon": "🔁🔁",
+            "icon": "🔁",
             "description": "Running: 2 serie da 6 ripetute"
         },
     },
@@ -276,7 +278,7 @@ PRESET_REPEAT_BLOCKS_BY_SPORT = {
             "icon": "🔁",
             "description": "Cycling: Cadence drills"
         },
-        "🔁🔁 3x [4x (2min Power_Z5 + 2min rec) + 5min rest]": {
+        "🔁 3x [4x (2min Power_Z5 + 2min rec) + 5min rest]": {
             "repetitions": 3,
             "steps": [
                 {
@@ -289,7 +291,7 @@ PRESET_REPEAT_BLOCKS_BY_SPORT = {
                 },
                 {"type": "rest", "duration": "5min", "target": ""}
             ],
-            "icon": "🔁🔁",
+            "icon": "🔁",
             "description": "Cycling: VO2max intervals"
         },
     },
@@ -322,7 +324,7 @@ PRESET_REPEAT_BLOCKS_BY_SPORT = {
             "icon": "🔁",
             "description": "Swimming: Tempo intervals"
         },
-        "🔁🔁 3x [4x (25m Swim_Z5 + 15sec) + 60sec rest]": {
+        "🔁 3x [4x (25m Swim_Z5 + 15sec) + 60sec rest]": {
             "repetitions": 3,
             "steps": [
                 {
@@ -335,7 +337,7 @@ PRESET_REPEAT_BLOCKS_BY_SPORT = {
                 },
                 {"type": "rest", "duration": "60sec", "target": ""}
             ],
-            "icon": "🔁🔁",
+            "icon": "🔁",
             "description": "Swimming: Sprint short bursts"
         },
     }
@@ -371,15 +373,16 @@ class WorkoutStep:
             return f"{indent_str}{self.step_type}: {self.duration}"
     
     def get_icon(self) -> str:
-        """Ritorna l'icona rappresentativa dello step."""
-        icons = {
-            "warmup": "🔥",
-            "cooldown": "❄️",
-            "interval": "⚡",
-            "recovery": "🧘",
-            "rest": "⏸️"
-        }
-        return icons.get(self.step_type, "▪️")
+            """Ritorna l'icona rappresentativa dello step."""
+            icons = {
+                "warmup": "🔥",
+                "cooldown": "❄️",
+                "interval": "⚡",
+                "recovery": "🧘",
+                "rest": "⏸️"
+            }
+            return icons.get(self.step_type, "▪️")
+
     
     def get_display_text(self) -> str:
         """Testo da mostrare nella lista visuale."""
@@ -484,6 +487,7 @@ class VisualWorkoutBuilder(tk.Toplevel):
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
         ttk.Button(toolbar, text="🔁 Aggiungi Repeat Block", command=self._add_repeat_block).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="📄 Mostra DSL", command=self._show_dsl).pack(side=tk.LEFT, padx=2)
+
         
         # Main container
         main_container = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
@@ -650,7 +654,7 @@ class VisualWorkoutBuilder(tk.Toplevel):
         # ========== COMMON (Rest, Lap Button) ==========
         ttk.Label(
             self.preset_frame,
-            text="⚙️ COMMON",
+            text="🧩 COMMON",
             font=("", 10, "bold"),
             foreground="gray"
         ).pack(fill=tk.X, pady=(5, 2))
@@ -948,7 +952,7 @@ class VisualWorkoutBuilder(tk.Toplevel):
         return {'moved': False, 'new_idx': target_idx, 'flat_idx': current_flat_idx}
     
     def _move_step_down(self):
-        """Sposta lo step selezionato in giù."""
+        """Sposta lo step selezionato in giÃÂ¹."""
         selection = self.steps_listbox.curselection()
         if not selection:
             return
@@ -1088,7 +1092,7 @@ class VisualWorkoutBuilder(tk.Toplevel):
                 indent += 1
                 line = line[2:]
             
-            # Check se è repeat
+            # Check se ÃÂ¨ repeat
             if line.strip().lower().startswith("repeat"):
                 import re
                 m = re.match(r"repeat\s+(\d+)\s*:", line.strip(), re.IGNORECASE)
@@ -1109,7 +1113,7 @@ class VisualWorkoutBuilder(tk.Toplevel):
                             current_repeat_stack.append(new_repeat)
                     continue
             
-            # Altrimenti è uno step normale
+            # Altrimenti ÃÂ¨ uno step normale
             step = WorkoutStep.from_dsl(original_line)
             
             # Determina dove aggiungere lo step
@@ -1226,8 +1230,8 @@ class StepEditorDialog(tk.Toplevel):
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        ttk.Button(btn_frame, text="💾 Salva", command=self._save).pack(side=tk.RIGHT, padx=2)
-        ttk.Button(btn_frame, text="❌ Annulla", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_frame, text="[SAVE] Salva", command=self._save).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_frame, text="Ã¢ÂÅ Annulla", command=self.destroy).pack(side=tk.RIGHT, padx=2)
     
     def _save(self):
         """Salva le modifiche."""
@@ -1366,7 +1370,7 @@ class NewWorkoutDialog(tk.Toplevel):
         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
         
         ttk.Button(btn_frame, text="✅ Crea", command=self._create).pack(side=tk.RIGHT, padx=2)
-        ttk.Button(btn_frame, text="❌ Annulla", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_frame, text="Ã¢ÂÅ Annulla", command=self.destroy).pack(side=tk.RIGHT, padx=2)
     
     def _create(self):
         """Crea il workout."""
@@ -1418,6 +1422,7 @@ class TrainingPlannerAdvancedGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Training Planner - Multi-Sport Edition 🏃🚴🏊")
+
         
         self.excel_path: Optional[str] = None
         self.df_workouts: Optional[pd.DataFrame] = None
@@ -1442,6 +1447,7 @@ class TrainingPlannerAdvancedGUI:
         
         self.lbl_file = ttk.Label(toolbar, text="Nessun file caricato")
         self.lbl_file.pack(side=tk.LEFT, padx=10)
+
         
         # Garmin frame
         garmin_frame = ttk.LabelFrame(self.root, text="⌚ Garmin Connect", padding=10)
@@ -1465,7 +1471,7 @@ class TrainingPlannerAdvancedGUI:
         ttk.Button(btn_frame_login, text="🔐 Login", command=self._login_credentials).pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
         ttk.Button(btn_frame_login, text="♻️ Usa Sessione", command=self._login_session).pack(side=tk.TOP, fill=tk.X)
         
-        self.lbl_garmin_status = ttk.Label(garmin_frame, text="● Non connesso", foreground="red", font=("", 9, "bold"))
+        self.lbl_garmin_status = ttk.Label(garmin_frame, text="⛔ Non connesso", foreground="red", font=("", 9, "bold"))
         self.lbl_garmin_status.grid(row=0, column=4, rowspan=2, sticky="w", padx=(15, 0))
         
         # Separator
@@ -1488,6 +1494,7 @@ class TrainingPlannerAdvancedGUI:
         ttk.Button(btn_ops, text="📤📅 Carica+Pianifica", command=self._upload_and_schedule).grid(row=0, column=1, sticky="ew", padx=(0, 5))
         ttk.Button(btn_ops, text="📅✖ Rimuovi Piano", command=self._unschedule).grid(row=0, column=2, sticky="ew", padx=(0, 5))
         ttk.Button(btn_ops, text="🗑 Cancella", command=self._delete_workouts).grid(row=0, column=3, sticky="ew")
+
         
         # Main container
         main_pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -1527,6 +1534,7 @@ class TrainingPlannerAdvancedGUI:
         # Tab: Visual Editor
         visual_frame = ttk.Frame(notebook, padding=5)
         notebook.add(visual_frame, text="🎨 Editor Visuale")
+
         
         # Metadata
         meta_frame = ttk.Frame(visual_frame)
@@ -1592,7 +1600,7 @@ class TrainingPlannerAdvancedGUI:
         # Visual builder button
         btn_visual = ttk.Button(
             visual_frame,
-            text="🎨 Apri Visual Builder",
+            text="✏️ Apri Visual Builder",
             command=self._open_visual_builder
         )
         btn_visual.pack(pady=5)
@@ -1638,6 +1646,7 @@ class TrainingPlannerAdvancedGUI:
         self.tree_params.pack(fill=tk.BOTH, expand=True)
         
         ttk.Button(params_frame, text="✏️ Modifica", command=self._edit_parameter).pack(pady=5)
+
     
     # ========== Excel Operations ==========
     
@@ -1709,7 +1718,7 @@ class TrainingPlannerAdvancedGUI:
             return
         
         try:
-            generate_training_excel_multisport(path)
+            generate_training_excel(path, multisport=True)
             messagebox.showinfo("OK", f"File di esempio creato:\n{path}")
         except Exception as e:
             messagebox.showerror("Errore", f"Errore nella generazione:\n{e}")
@@ -1994,7 +2003,7 @@ class TrainingPlannerAdvancedGUI:
                 
                 # Notifica visiva
                 messagebox.showinfo(
-                    "✅ Salvato",
+                    "Ã¢Åâ¦ Salvato",
                     "Workout salvato automaticamente!\n\n"
                     "Gli step sono stati aggiornati nell'Excel.",
                     parent=self.root
@@ -2060,7 +2069,7 @@ class TrainingPlannerAdvancedGUI:
             "Conferma Eliminazione",
             "Vuoi eliminare questo workout dalla lista Excel?\n\n"
             "Nota: se il workout è già caricato su Garmin,\n"
-            "dovrai cancellarlo separatamente con il bottone '🗑 Cancella'."
+            "dovrai cancellarlo separatamente con il bottone '🗑️ Cancella'."
         ):
             return
         
@@ -2155,7 +2164,7 @@ class TrainingPlannerAdvancedGUI:
             self._autosave()
             win.destroy()
         
-        ttk.Button(win, text="💾 Salva", command=save).grid(row=4, column=0, columnspan=2, pady=10)
+        ttk.Button(win, text="[SAVE] Salva", command=save).grid(row=4, column=0, columnspan=2, pady=10)
     
     # ========== Garmin Operations ==========
     
@@ -2170,20 +2179,20 @@ class TrainingPlannerAdvancedGUI:
         
         try:
             self.garmin.login_with_credentials(email, password)
-            self.lbl_garmin_status.config(text="● Connesso", foreground="green")
+            self.lbl_garmin_status.config(text="✅ Connesso", foreground="green")
             messagebox.showinfo("OK", "Login effettuato!")
         except Exception as e:
-            self.lbl_garmin_status.config(text="● Non connesso", foreground="red")
+            self.lbl_garmin_status.config(text="⛔ Non connesso", foreground="red")
             messagebox.showerror("Errore", f"Errore login:\n{e}")
     
     def _login_session(self):
         """Login con sessione salvata."""
         try:
             self.garmin.login_with_saved_session()
-            self.lbl_garmin_status.config(text="● Connesso", foreground="green")
+            self.lbl_garmin_status.config(text="✅ Connesso", foreground="green")
             messagebox.showinfo("OK", "Login con sessione effettuato!")
         except Exception as e:
-            self.lbl_garmin_status.config(text="● Non connesso", foreground="red")
+            self.lbl_garmin_status.config(text="⛔ Non connesso", foreground="red")
             messagebox.showerror("Errore", f"Errore sessione:\n{e}")
     
     def _get_selected_indices(self) -> List[int]:
