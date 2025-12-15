@@ -1292,6 +1292,8 @@ class LoadingDialog:
 # NEW WORKOUT DIALOG
 # ============================================================================
 
+
+
 class NewWorkoutDialog(tk.Toplevel):
     """Dialog per creare un nuovo workout."""
     
@@ -1325,19 +1327,38 @@ class NewWorkoutDialog(tk.Toplevel):
         self.entry_week.grid(row=0, column=1, sticky="w", pady=8)
         self.entry_week.insert(0, "1")
         
-        # Date
-        ttk.Label(frame, text="Date (YYYY-MM-DD):").grid(row=1, column=0, sticky="w", pady=8)
-        self.entry_date = ttk.Entry(frame, width=25)
-        self.entry_date.grid(row=1, column=1, sticky="we", pady=8)
+        # Date - CON CALENDARIO! 📅
+        ttk.Label(frame, text="Date:").grid(row=1, column=0, sticky="w", pady=8)
         
-        # Data di default: oggi
-        from datetime import date
-        today = date.today().isoformat()
-        self.entry_date.insert(0, today)
+        # Frame per Date + bottone calendario
+        date_frame = ttk.Frame(frame)
+        date_frame.grid(row=1, column=1, sticky="w", pady=8)
         
-        ttk.Label(frame, text="(es: 2025-05-15)", font=("", 8), foreground="gray").grid(
-            row=1, column=2, sticky="w", padx=(5, 0)
-        )
+        # Date picker
+        if HAS_CALENDAR:
+            self.entry_date = DateEntry(
+                date_frame,
+                width=12,
+                background='darkblue',
+                foreground='white',
+                borderwidth=2,
+                date_pattern='yyyy-mm-dd',
+                showweeknumbers=False
+            )
+            self.entry_date.pack(side=tk.LEFT)
+            
+            # Bottone per aprire calendario 📅
+            btn_cal = ttk.Button(date_frame, text="📅", width=3,
+                                command=lambda: self.entry_date.drop_down())
+            btn_cal.pack(side=tk.LEFT, padx=(2, 0))
+        else:
+            # Fallback senza tkcalendar
+            from datetime import date
+            today = date.today().isoformat()
+            self.entry_date = ttk.Entry(date_frame, width=12)
+            self.entry_date.pack(side=tk.LEFT)
+            self.entry_date.insert(0, today)
+        
         
         # Session
         ttk.Label(frame, text="Session:").grid(row=2, column=0, sticky="w", pady=8)
@@ -1368,9 +1389,11 @@ class NewWorkoutDialog(tk.Toplevel):
         # Buttons
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+
+        ttk.Button(btn_frame, text="✅Crea", command=self._create, width=10).pack(side=tk.RIGHT, padx=2, pady=10)
+        ttk.Button(btn_frame, text="❌Annulla", command=self.destroy, width=10).pack(side=tk.RIGHT, padx=2, pady=10)
         
-        ttk.Button(btn_frame, text="✅ Crea", command=self._create).pack(side=tk.RIGHT, padx=2)
-        ttk.Button(btn_frame, text="Ã¢ÂÅ Annulla", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+
     
     def _create(self):
         """Crea il workout."""

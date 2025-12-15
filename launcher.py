@@ -183,7 +183,7 @@ class LauncherDialog:
                 f.write(version)
             print(f"✅ Preferenza salvata: {version}")
         except Exception as e:
-            print(f"⚠️  Impossibile salvare preferenza: {e}")
+            print(f"⚠️ Impossibile salvare preferenza: {e}")
     
     def show(self):
         """Mostra il dialog e ritorna la scelta."""
@@ -211,7 +211,7 @@ def clear_preference():
             pref_file.unlink()
             print("✅ Preferenza cancellata")
     except Exception as e:
-        print(f"⚠️  Errore cancellazione preferenza: {e}")
+        print(f"⚠️ Errore cancellazione preferenza: {e}")
 
 
 def launch_gui(version):
@@ -229,22 +229,26 @@ def launch_gui(version):
         print(f"❌ Versione non valida: {version}")
         return False
     
+    # Usa la directory dello script, non la cwd
+    script_dir = Path(__file__).parent.resolve()
+    gui_path = script_dir / gui_file
+    
     # Verifica che il file esista
-    if not Path(gui_file).exists():
+    if not gui_path.exists():
         messagebox.showerror(
             "Errore",
-            f"File non trovato: {gui_file}\n\n"
-            "Assicurati di eseguire questo script dalla directory del progetto."
+            f"File non trovato: {gui_path}\n\n"
+            "Assicurati che tutti i file .py siano nella stessa cartella del launcher."
         )
         return False
     
     # Avvia la GUI
     print(f"🚀 Avvio {version.title()} GUI...")
-    print(f"   File: {gui_file}")
+    print(f"   File: {gui_path}")
     
     try:
-        # Avvia come subprocess per permettere al launcher di chiudersi
-        subprocess.Popen([sys.executable, gui_file])
+        # Avvia come subprocess con cwd impostata alla directory dello script
+        subprocess.Popen([sys.executable, str(gui_path)], cwd=script_dir)
         return True
     except Exception as e:
         messagebox.showerror(
@@ -296,7 +300,7 @@ def main():
     # Controlla se c'è una preferenza salvata
     preferred = load_preference()
     if preferred:
-        print(f"ℹ️  Preferenza salvata trovata: {preferred.title()}")
+        print(f"ℹ️ Preferenza salvata trovata: {preferred.title()}")
         print(f"🚀 Avvio automatico...")
         print(f"   (Usa 'python launcher.py --reset' per cambiare)\n")
         
@@ -312,14 +316,14 @@ def main():
         if launch_gui(selected):
             print(f"✅ {selected.title()} GUI avviata!")
     else:
-        print("ℹ️  Avvio annullato")
+        print("ℹ️ Avvio annullato")
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n⚠️  Avvio interrotto dall'utente")
+        print("\n⚠️ Avvio interrotto dall'utente")
     except Exception as e:
         print(f"\n❌ Errore: {e}")
         import traceback
