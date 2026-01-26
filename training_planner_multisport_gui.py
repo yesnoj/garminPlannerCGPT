@@ -22,6 +22,7 @@ except ImportError:
 from excel_utils import generate_training_excel, format_workbook_dates_and_steps
 from dsl_parser import expand_repeat_lines, build_garmin_workout_from_excel_row
 from garmin_service import GarminService
+from download_dialog import show_download_dialog
 
 
 # ============================================================================
@@ -1510,13 +1511,14 @@ class TrainingPlannerAdvancedGUI:
         btn_ops = ttk.Frame(garmin_frame)
         btn_ops.grid(row=5, column=0, columnspan=5, sticky="ew")
         
-        for i in range(4):
+        for i in range(5):  # Aumentato per il nuovo pulsante Download
             btn_ops.columnconfigure(i, weight=1)
         
         ttk.Button(btn_ops, text="📤 Carica", command=self._upload_workouts).grid(row=0, column=0, sticky="ew", padx=(0, 5))
         ttk.Button(btn_ops, text="📤📅 Carica+Pianifica", command=self._upload_and_schedule).grid(row=0, column=1, sticky="ew", padx=(0, 5))
         ttk.Button(btn_ops, text="📅✖ Rimuovi Piano", command=self._unschedule).grid(row=0, column=2, sticky="ew", padx=(0, 5))
-        ttk.Button(btn_ops, text="🗑 Cancella", command=self._delete_workouts).grid(row=0, column=3, sticky="ew")
+        ttk.Button(btn_ops, text="🗑 Cancella", command=self._delete_workouts).grid(row=0, column=3, sticky="ew", padx=(0, 5))
+        ttk.Button(btn_ops, text="📥 Download", command=self._download_from_garmin).grid(row=0, column=4, sticky="ew")
 
         
         # Main container
@@ -2533,6 +2535,24 @@ class TrainingPlannerAdvancedGUI:
                 return True, "Nessun workout cancellato."
         
         self._run_with_loading(operation, "Cancellazione workout")
+
+    def _download_from_garmin(self):
+        """Apre dialog per scaricare workout/attività da Garmin."""
+        if self.garmin.client is None:
+            messagebox.showerror("Errore", "Non connesso a Garmin.")
+            return
+        
+        # Mostra dialog
+        result_file = show_download_dialog(self.root, self.garmin)
+        
+        if result_file:
+            messagebox.showinfo(
+                "Completato",
+                f"✅ Dati scaricati con successo!\n\n"
+                f"File: {result_file}\n\n"
+                "Puoi analizzare il file JSON con il tuo strumento preferito."
+            )
+
 
 
 # ============================================================================

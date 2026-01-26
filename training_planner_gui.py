@@ -14,6 +14,7 @@ except ImportError:
 from excel_utils import generate_training_excel, format_workbook_dates_and_steps
 from dsl_parser import expand_repeat_lines, build_garmin_workout_from_excel_row
 from garmin_service import GarminService
+from download_dialog import show_download_dialog
 
 
 class LoadingDialog:
@@ -178,7 +179,7 @@ class TrainingPlannerGUI:
         btn_operations_frame.grid(row=5, column=0, columnspan=5, sticky="ew")
         
         # Configura le colonne del frame operazioni per distribuire uniformemente
-        for i in range(4):
+        for i in range(5):  # Cambiato da 4 a 5 per il nuovo pulsante
             btn_operations_frame.columnconfigure(i, weight=1)
         
         # Bottoni operazioni principali
@@ -208,7 +209,14 @@ class TrainingPlannerGUI:
             text="🗑 Cancella da Garmin",
             command=self.delete_workouts_from_garmin,
         )
-        btn_delete.grid(row=0, column=3, sticky="ew")
+        btn_delete.grid(row=0, column=3, sticky="ew", padx=(0, 5))
+
+        btn_download = ttk.Button(
+            btn_operations_frame,
+            text="📥 Download",
+            command=self._download_from_garmin,
+        )
+        btn_download.grid(row=0, column=4, sticky="ew")
 
 
         # Main split
@@ -1125,6 +1133,24 @@ class TrainingPlannerGUI:
                 return True, "Nessun workout ÃƒÂ¨ stato cancellato (nessun WorkoutId valido nelle righe selezionate)."
         
         self._run_with_loading(operation, "Cancellazione workout da Garmin")
+
+
+    def _download_from_garmin(self):
+        """Apre dialog per scaricare workout/attività da Garmin."""
+        if self.garmin.client is None:
+            messagebox.showerror("Errore", "Non sei connesso a Garmin.")
+            return
+        
+        # Mostra dialog
+        result_file = show_download_dialog(self.root, self.garmin)
+        
+        if result_file:
+            messagebox.showinfo(
+                "Completato",
+                f"✅ Dati scaricati con successo!\n\n"
+                f"File: {result_file}\n\n"
+                "Puoi analizzare il file JSON con il tuo strumento preferito."
+            )
 
 
 
