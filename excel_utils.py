@@ -23,6 +23,7 @@ def format_workbook_dates_and_steps(path: str):
 
         # Trova colonne
         date_col_idx = sched_col_idx = desc_col_idx = steps_col_idx = None
+        workout_id_col_idx = workout_schedule_id_col_idx = None
         for cell in ws[1]:
             header = str(cell.value).strip().lower() if cell.value is not None else ""
             if header == "date":
@@ -34,6 +35,22 @@ def format_workbook_dates_and_steps(path: str):
             elif header == "steps":
                 steps_col_idx = cell.column
 
+        # IMPORTANTE: Forza WorkoutId e WorkoutScheduleId come TESTO per evitare overflow
+        if workout_id_col_idx is not None:
+            workout_id_letter = get_column_letter(workout_id_col_idx)
+            for row_idx in range(2, ws.max_row + 1):
+                cell = ws[f"{workout_id_letter}{row_idx}"]
+                if cell.value is not None and str(cell.value).strip() != "":
+                    cell.number_format = "@"
+                    cell.value = str(cell.value)
+
+        if workout_schedule_id_col_idx is not None:
+            workout_schedule_id_letter = get_column_letter(workout_schedule_id_col_idx)
+            for row_idx in range(2, ws.max_row + 1):
+                cell = ws[f"{workout_schedule_id_letter}{row_idx}"]
+                if cell.value is not None and str(cell.value).strip() != "":
+                    cell.number_format = "@"
+                    cell.value = str(cell.value)
         # Formato data DD/MM/YYYY
         if date_col_idx is not None:
             date_letter = get_column_letter(date_col_idx)

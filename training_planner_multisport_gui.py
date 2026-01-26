@@ -1771,7 +1771,12 @@ class TrainingPlannerAdvancedGUI:
                 if col not in self.df_workouts.columns:
                     self.df_workouts[col] = ""
             
-            self.df_workouts["WorkoutId"] = self.df_workouts["WorkoutId"].astype("string")
+            # FIX: Forza WorkoutId e WorkoutScheduleId come stringhe per evitare overflow
+            if "WorkoutId" in self.df_workouts.columns:
+                self.df_workouts["WorkoutId"] = self.df_workouts["WorkoutId"].astype(str).replace('nan', '').replace('<NA>', '')
+            if "WorkoutScheduleId" in self.df_workouts.columns:
+                self.df_workouts["WorkoutScheduleId"] = self.df_workouts["WorkoutScheduleId"].astype(str).replace('nan', '').replace('<NA>', '')
+            
             self.df_workouts["ScheduledDate"] = self.df_workouts["ScheduledDate"].astype("string")
             
             self.excel_path = path
@@ -1818,7 +1823,7 @@ class TrainingPlannerAdvancedGUI:
         df_temp = self.df_workouts.copy()
         
         if "Date" in df_temp.columns:
-            df_temp["Date"] = pd.to_datetime(df_temp["Date"], errors="coerce", dayfirst=True)
+            df_temp["Date"] = pd.to_datetime(df_temp["Date"], format="%Y-%m-%d", errors="coerce")
         
         if "ScheduledDate" in df_temp.columns:
             def to_date_only(val):
@@ -1830,6 +1835,12 @@ class TrainingPlannerAdvancedGUI:
                 except:
                     return None
             df_temp["ScheduledDate"] = df_temp["ScheduledDate"].apply(to_date_only)
+        
+        # FIX: Converti ID in stringhe prima di salvare per evitare overflow
+        if "WorkoutId" in df_temp.columns:
+            df_temp["WorkoutId"] = df_temp["WorkoutId"].astype(str).replace("nan", "").replace("<NA>", "")
+        if "WorkoutScheduleId" in df_temp.columns:
+            df_temp["WorkoutScheduleId"] = df_temp["WorkoutScheduleId"].astype(str).replace("nan", "").replace("<NA>", "")
         
         # Preserva fogli esistenti
         existing_sheets = {}
@@ -1915,11 +1926,15 @@ class TrainingPlannerAdvancedGUI:
         row = self.df_workouts.iloc[idx]
         iid = str(idx)
         
-        workout_id = str(row.get("WorkoutId", "")).strip()
-        sched_date = str(row.get("ScheduledDate", "")).strip()
-        
-        if workout_id.lower() in ("nan", "<na>"):
+        workout_id_raw = row.get("WorkoutId", "")
+        if pd.isna(workout_id_raw):
             workout_id = ""
+        else:
+            workout_id = str(workout_id_raw).strip()
+            if workout_id.lower() in ("nan", "<na>", "none", ""):
+                workout_id = ""
+        
+        sched_date = str(row.get("ScheduledDate", "")).strip()
         if sched_date.lower() in ("nan", "<na>"):
             sched_date = ""
         
@@ -2229,7 +2244,16 @@ class TrainingPlannerAdvancedGUI:
             messagebox.showerror("Errore", "Seleziona almeno un workout.")
             return []
         
-        return [int(iid) for iid in sel]
+        # Rimuovi duplicati preservando l'ordine
+        indices = []
+        seen = set()
+        for iid in sel:
+            idx = int(iid)
+            if idx not in seen:
+                indices.append(idx)
+                seen.add(idx)
+        
+        return indices
     
     def _run_with_loading(self, operation_func, title="Operazione in corso..."):
         """Esegue operazione con loading dialog."""
@@ -2333,9 +2357,15 @@ class TrainingPlannerAdvancedGUI:
                     raise ValueError(f"Formato data non valido: {date_str}")
                 
                 # Crea se serve
-                workout_id = str(row.get("WorkoutId", "")).strip()
-                if workout_id.lower() in ("nan", "<na>", ""):
+                workout_id_raw = row.get("WorkoutId", "")
+                
+                # Gestisci NaN/None/vuoto
+                if pd.isna(workout_id_raw):
                     workout_id = ""
+                else:
+                    workout_id = str(workout_id_raw).strip()
+                    if workout_id.lower() in ("nan", "<na>", "none", ""):
+                        workout_id = ""
                 
                 if not workout_id:
                     loading.update_message(f"Creazione workout {i}/{num}...")
@@ -2399,11 +2429,15 @@ class TrainingPlannerAdvancedGUI:
                 
                 row = self.df_workouts.iloc[idx]
                 
-                schedule_id = str(row.get("WorkoutScheduleId", "")).strip()
-                sched_date = str(row.get("ScheduledDate", "")).strip()
-                
-                if schedule_id.lower() in ("nan", "<na>", ""):
+                schedule_id_raw = row.get("WorkoutScheduleId", "")
+                if pd.isna(schedule_id_raw):
                     schedule_id = ""
+                else:
+                    schedule_id = str(schedule_id_raw).strip()
+                    if schedule_id.lower() in ("nan", "<na>", "none", ""):
+                        schedule_id = ""
+                
+                sched_date = str(row.get("ScheduledDate", "")).strip()
                 if sched_date.lower() in ("nan", "<na>", ""):
                     sched_date = ""
                 
@@ -2451,16 +2485,28 @@ class TrainingPlannerAdvancedGUI:
                 
                 row = self.df_workouts.iloc[idx]
                 
-                workout_id = str(row.get("WorkoutId", "")).strip()
-                if workout_id.lower() in ("nan", "<na>", ""):
+                workout_id_raw = row.get("WorkoutId", "")
+                if pd.isna(workout_id_raw):
+                    continue
+                    
+                workout_id = str(workout_id_raw).strip()
+                if workout_id.lower() in ("nan", "<na>", "none", ""):
                     continue
                 
                 # Rimuovi pianificazione se esiste
-                schedule_id = str(row.get("WorkoutScheduleId", "")).strip()
-                sched_date = str(row.get("ScheduledDate", "")).strip()
+                schedule_id_raw = row.get("WorkoutScheduleId", "")
+                if pd.isna(schedule_id_raw):
+                    schedule_id = ""
+                else:
+                    schedule_id = str(schedule_id_raw).strip()
+                    if schedule_id.lower() in ("nan", "<na>", "none", ""):
+                        schedule_id = ""
                 
-                if schedule_id and schedule_id.lower() not in ("nan", "<na>", "") and \
-                   sched_date and sched_date.lower() not in ("nan", "<na>", ""):
+                sched_date = str(row.get("ScheduledDate", "")).strip()
+                if sched_date.lower() in ("nan", "<na>", ""):
+                    sched_date = ""
+                
+                if schedule_id and sched_date:
                     try:
                         loading.update_message(f"Rimozione pianificazione {i}/{num}...")
                         self.garmin.unschedule_workout(schedule_id, sched_date)

@@ -391,13 +391,15 @@ class TrainingPlannerGUI:
             except Exception:
                 self.df_parameters = pd.DataFrame(columns=["Key", "Metric", "Expression", "Notes"])
 
-            for col in ["WorkoutId", "ScheduledDate"]:
+            for col in ["WorkoutId", "ScheduledDate", "WorkoutScheduleId"]:
                 if col not in self.df_workouts.columns:
                     self.df_workouts[col] = ""
 
-            # forza tipo stringa per evitare future warning
+            # FIX: Forza WorkoutId e WorkoutScheduleId come stringhe per evitare overflow
             if "WorkoutId" in self.df_workouts.columns:
-                self.df_workouts["WorkoutId"] = self.df_workouts["WorkoutId"].astype("string")
+                self.df_workouts["WorkoutId"] = self.df_workouts["WorkoutId"].astype(str).replace('nan', '').replace('<NA>', '')
+            if "WorkoutScheduleId" in self.df_workouts.columns:
+                self.df_workouts["WorkoutScheduleId"] = self.df_workouts["WorkoutScheduleId"].astype(str).replace('nan', '').replace('<NA>', '')
             if "ScheduledDate" in self.df_workouts.columns:
                 self.df_workouts["ScheduledDate"] = self.df_workouts["ScheduledDate"].astype("string")
 
@@ -427,7 +429,7 @@ class TrainingPlannerGUI:
         # Date -> datetime
         if "Date" in df_temp.columns:
             df_temp["Date"] = pd.to_datetime(
-                df_temp["Date"], errors="coerce", dayfirst=True
+                df_temp["Date"], format="%Y-%m-%d", errors="coerce"
             )
 
         # ScheduledDate -> converti in date (solo data, no orario)
@@ -442,6 +444,12 @@ class TrainingPlannerGUI:
                     return None
             
             df_temp["ScheduledDate"] = df_temp["ScheduledDate"].apply(to_date_only)
+
+        # FIX: Converti ID in stringhe prima di salvare per evitare overflow
+        if "WorkoutId" in df_temp.columns:
+            df_temp["WorkoutId"] = df_temp["WorkoutId"].astype(str).replace("nan", "").replace("<NA>", "")
+        if "WorkoutScheduleId" in df_temp.columns:
+            df_temp["WorkoutScheduleId"] = df_temp["WorkoutScheduleId"].astype(str).replace("nan", "").replace("<NA>", "")
 
         # Carica eventuali fogli esistenti da preservare
         existing_sheets = {}
@@ -645,11 +653,9 @@ class TrainingPlannerGUI:
         row = self.df_workouts.iloc[idx]
         iid = str(idx)
 
-        workout_id = str(row.get("WorkoutId", "")).strip()
+        workout_id = self.normalize_workout_id(row.get("WorkoutId", ""))
         sched_date = str(row.get("ScheduledDate", "")).strip()
 
-        if workout_id.lower() in ("nan", "<na>"):
-            workout_id = ""
         if sched_date.lower() in ("nan", "<na>"):
             sched_date = ""
 
@@ -773,7 +779,15 @@ class TrainingPlannerGUI:
         if not sel:
             messagebox.showerror("Errore", "Seleziona almeno un allenamento nella tabella.")
             return []
-        return [int(iid) for iid in sel]
+        # Rimuovi duplicati preservando l'ordine
+        indices = []
+        seen = set()
+        for iid in sel:
+            idx = int(iid)
+            if idx not in seen:
+                indices.append(idx)
+                seen.add(idx)
+        return indices
 
     def _run_with_loading(self, operation_func, title="Operazione in corso..."):
         """
@@ -853,15 +867,20 @@ class TrainingPlannerGUI:
     def normalize_workout_id(self, value) -> str:
         """Converte il WorkoutId in stringa pulita per le API Garmin."""
         import math
+        import pandas as pd
 
         if value is None:
+            return ""
+        
+        # Gestisci NaN di pandas
+        if pd.isna(value):
             return ""
 
         if isinstance(value, float) and math.isnan(value):
             return ""
 
         s = str(value).strip()
-        if s.lower() in ("nan", "<na>", ""):
+        if s.lower() in ("nan", "<na>", "none", ""):
             return ""
         if s.endswith(".0"):
             s = s[:-2]
