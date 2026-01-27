@@ -36,7 +36,7 @@ class DownloadDialog:
         # Crea finestra modale
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Download Workout da Garmin")
-        self.dialog.geometry("550x650")  # Aumentato a 650 per campo nome file editabile
+        self.dialog.geometry("550x700")# Aumentato a 700 per campo nome file editabile
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()
