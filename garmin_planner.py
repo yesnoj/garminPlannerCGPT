@@ -26,7 +26,7 @@ from tree_dnd import TreeDragDrop
 from workout_editor import WorkoutEditor, _is_blank, _to_date, _to_int, center_on_parent
 
 APP_NAME = "Garmin Training Planner"
-APP_VERSION = "3.0"
+APP_VERSION = "3.3"
 WORKOUT_COLUMNS = ["Week", "Date", "Session", "Sport", "Description", "Steps",
                    "WorkoutId", "WorkoutScheduleId", "ScheduledDate"]
 PARAM_COLUMNS = ["Key", "Metric", "Expression", "Notes"]
@@ -1275,10 +1275,105 @@ class PlannerApp:
             messagebox.showinfo("Download completato", f"Dati salvati in:\n{result}")
 
 
+def _resource(*parts) -> str:
+    """Percorso di un file incluso, sia da sorgente sia dentro l'eseguibile PyInstaller."""
+    import sys
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
+
+
+def _set_icon(root: tk.Tk):
+    try:
+        img = tk.PhotoImage(file=_resource("assets", "app.png"))
+        root.iconphoto(True, img)
+        root._icon_ref = img  # evita la garbage collection
+    except (tk.TclError, OSError):
+        pass
+
+
+def self_test() -> str:
+    """Controllo rapido dell'installazione (usato con --self-test, utile per l'eseguibile)."""
+    import sys
+    import tempfile
+    lines = [f"{APP_NAME} {APP_VERSION} – autodiagnosi", f"Python {sys.version.split()[0]} · "
+             f"{'eseguibile' if getattr(sys, 'frozen', False) else 'sorgente'}"]
+
+    def ok(name, fn):
+        try:
+            extra = fn()
+            lines.append(f"OK   {name}" + (f" ({extra})" if extra else ""))
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"ERR  {name}: {type(e).__name__}: {e}")
+
+    import app_theme
+    ok("tema sv-ttk", lambda: "presente" if app_theme.sv_ttk else (_ for _ in ()).throw(ImportError("mancante")))
+    ok("client Garmin (garth)", lambda: __import__("garth").__version__)
+    tmp = os.path.join(tempfile.mkdtemp(), "prova.xlsx")
+    ok("crea Excel di esempio", lambda: generate_training_excel(tmp, multisport=True) or os.path.basename(tmp))
+
+    def parse_all():
+        x = pd.read_excel(tmp, sheet_name=None)
+        w, p = x["Workouts"], x["Parameters"]
+        errs = validate_workout_rows(w, list(range(len(w))), p, require_date=True)
+        if errs:
+            raise ValueError(errs[0])
+        return f"{len(w)} allenamenti validi"
+    ok("parser DSL", parse_all)
+
+    def calendar():
+        from tkcalendar import DateEntry
+        r = tk.Tk()
+        r.withdraw()
+        d = DateEntry(r, locale="it_IT", date_pattern="dd/mm/yyyy")
+        d.set_date(dt.date(2027, 3, 14))
+        v = d.get()
+        r.destroy()
+        return v
+    ok("calendario italiano", calendar)
+    ok("icona", lambda: os.path.basename(_resource("assets", "app.png")) if os.path.exists(
+        _resource("assets", "app.png")) else (_ for _ in ()).throw(FileNotFoundError("assets/app.png")))
+    return "\n".join(lines)
+
+
 def main():
-    root = tk.Tk()
-    PlannerApp(root)
-    root.mainloop()
+    import sys
+    import traceback
+    if "--self-test" in sys.argv:
+        report = self_test()
+        log_dir = os.path.join(os.path.expanduser("~"), ".garminplanner")
+        os.makedirs(log_dir, exist_ok=True)
+        with open(os.path.join(log_dir, "autodiagnosi.txt"), "w", encoding="utf-8") as f:
+            f.write(report)
+        print(report)
+        if getattr(sys, "frozen", False) and sys.platform.startswith("win"):
+            r = tk.Tk()
+            r.withdraw()
+            messagebox.showinfo(APP_NAME, report)
+            r.destroy()
+        sys.exit(1 if "ERR" in report else 0)
+    try:
+        if sys.platform.startswith("win"):
+            import ctypes
+            try:  # testo nitido sugli schermi ad alta risoluzione
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            except Exception:
+                pass
+        root = tk.Tk()
+        _set_icon(root)
+        PlannerApp(root)
+        root.mainloop()
+    except Exception:
+        # nell'eseguibile non c'e' console: salva l'errore in un file e mostralo
+        log_dir = os.path.join(os.path.expanduser("~"), ".garminplanner")
+        os.makedirs(log_dir, exist_ok=True)
+        log = os.path.join(log_dir, "errore_avvio.log")
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(traceback.format_exc())
+        try:
+            messagebox.showerror(APP_NAME, f"Errore imprevisto. Dettagli salvati in:\n{log}")
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":

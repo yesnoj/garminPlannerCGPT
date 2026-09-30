@@ -613,6 +613,9 @@ garminPlannerCGPT/
 ├── workout_model.py                    # Albero step <-> DSL, stime durata/km/intensità
 ├── app_theme.py                        # Tema chiaro/scuro e colori
 ├── launcher.py                         # Avvio (compatibilità)
+├── GarminTrainingPlanner.spec          # Ricetta PyInstaller per l'eseguibile
+├── build_exe.bat / build_app.sh        # Script di build (Windows / macOS-Linux)
+├── assets/                             # Icona dell'app
 ├── gui_helpers.py                      # Finestra errori di validazione
 ├── legacy/                             # Vecchie interfacce v2 (riserva)
 ├── download_dialog.py                  # Dialog download
@@ -653,13 +656,27 @@ python -m pytest -q
 ```
 I test non richiedono né la GUI né la connessione a Garmin.
 
-### Build Eseguibile
+### Build Eseguibile (un unico file con tutte le dipendenze)
 
-```bash
-python -m PyInstaller training_planner_gui.spec
+**Windows:** doppio clic su `build_exe.bat` (serve Python 3.10–3.13 da python.org, solo per la build).
+Lo script crea un ambiente pulito `.venv-build`, installa le dipendenze e PyInstaller e produce
+`dist\GarminTrainingPlanner.exe`, che gira su qualunque PC Windows senza Python.
 
-# Risultato in dist/ (GarminTrainingPlanner.app su macOS, .exe su Windows)
+**macOS / Linux:** `./build_app.sh` → `dist/GarminTrainingPlanner.app` (macOS) o `dist/GarminTrainingPlanner`.
+
+PyInstaller crea l'eseguibile solo per il sistema su cui gira: l'`.exe` va costruito su Windows,
+l'app per Mac su un Mac.
+
+Verifica dell'eseguibile:
 ```
+dist\GarminTrainingPlanner.exe --self-test
+```
+Controlla tema, client Garmin, Excel, parser e calendario e salva il risultato in `~/.garminplanner/autodiagnosi.txt`.
+Se l'app non si avvia, l'errore viene salvato in `~/.garminplanner/errore_avvio.log`.
+
+Note:
+- l'eseguibile non è firmato: al primo avvio Windows SmartScreen può mostrare "PC protetto" → *Ulteriori informazioni* → *Esegui comunque*; sui PC aziendali l'antivirus potrebbe richiedere un'eccezione;
+- la sessione Garmin resta in `~/.garminplanner/tokens`, fuori dall'eseguibile.
 
 ---
 
@@ -676,6 +693,11 @@ I contributi sono benvenuti! Per favore:
 ---
 
 ## 📝 Changelog
+
+### v3.3.0 (2026-09-30)
+- 📦 Eseguibile unico con tutte le dipendenze: `build_exe.bat` (Windows) e `build_app.sh` (macOS/Linux), icona dell'app
+- 🩺 `--self-test` per verificare l'installazione; errori di avvio salvati in un log
+
 
 ### v3.2.0 (2026-09-30)
 - 🌗 Tema scuro leggibile anche senza sv-ttk (tema di riserva completo) e barra del titolo scura su Windows
