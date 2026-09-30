@@ -19,7 +19,7 @@ venv/
 
 # Build PyInstaller
 build/
-dist/
+# dist/
 
 # Sistema
 .DS_Store
