@@ -1,0 +1,8 @@
+pandas>=2.0
+openpyxl>=3.1
+tkcalendar>=1.6
+sv-ttk>=2.6        # tema grafico chiaro/scuro
+darkdetect>=0.8    # segue il tema del sistema (facoltativo)
+# garth e' la libreria (non ufficiale) per Garmin Connect. E' stata dichiarata
+# "deprecated" dall'autore: versione fissata a quella testata.
+garth==0.8.0

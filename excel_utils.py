@@ -319,8 +319,8 @@ def _generate_running_excel(output_path: str):
 
     esempi_dsl_data = [
         # DURATE
-        {"Categoria": "DURATE", "Esempio": "warmup: 10min @ Z2", "Descrizione": "Durata in minuti (anche: 10m, 10')"},
-        {"Categoria": "DURATE", "Esempio": "interval: 30sec @ Z5", "Descrizione": "Durata in secondi (anche: 30s)"},
+        {"Categoria": "DURATE", "Esempio": "warmup: 10min @ Z2", "Descrizione": "Durata in minuti (anche: 1.5min, 10', 10 minuti). ATTENZIONE: 10m = 10 METRI"},
+        {"Categoria": "DURATE", "Esempio": "interval: 30sec @ Z5", "Descrizione": "Durata in secondi (anche: 30s, 90s); ore: 1h; mm:ss: 1:30"},
         {"Categoria": "DURATE", "Esempio": "warmup: lap-button @ Z2", "Descrizione": "Premi lap per continuare"},
         
         # DISTANZE
@@ -669,7 +669,7 @@ def _generate_multisport_excel(output_path: str):
     esempi_dsl_data = [
         # ==================== GENERALE ====================
         {"Categoria": "DURATE", "Esempio": "warmup: 10min @ Z2", 
-         "Descrizione": "Durata in minuti (10min, 10m, 10')"},
+         "Descrizione": "Durata in minuti (10min, 1.5min, 10'). ATTENZIONE: 10m = 10 METRI"},
         {"Categoria": "DURATE", "Esempio": "interval: 30sec @ Z5", 
          "Descrizione": "Durata in secondi (30sec, 30s)"},
         {"Categoria": "DURATE", "Esempio": "warmup: lap-button @ Z2", 

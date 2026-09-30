@@ -1,3 +1,28 @@
+"""
+Parser del DSL dei workout (colonna "Steps" dell'Excel) -> JSON Garmin Connect.
+
+Formato supportato (una riga per step, i blocchi repeat si indentano):
+
+    warmup: 15min @ Z2
+    repeat 5:
+      interval: 1000m @ 4:50-5:00
+      recovery: 2min @ Z1
+    cooldown: 10min @ Z1
+
+Novita' rispetto alla versione precedente:
+- ogni errore viene segnalato (DSLError) con il numero di riga, invece di
+  trasformarsi in silenzio in uno step di 60 secondi o senza target;
+- durate decimali e in ore (1.5min, 90s, 1h, 1:30), apice tipografico (40′);
+- indentazione libera sotto "repeat" (2 o 4 spazi, tab), purche' coerente;
+- le chiavi del foglio Parameters sono cercate senza distinzione maiuscole/minuscole
+  (prima Swim_Z*, Cadence_* o Easy_Range venivano ignorate);
+- "rest:" produce uno step di tipo Riposo (prima veniva inviato come Recupero);
+- validate_workout_rows() controlla un intero piano prima del caricamento.
+
+Per input validi il JSON prodotto e' identico a quello della versione precedente
+(eccetto il tipo degli step "rest").
+"""
+import math
 import re
 from typing import List, Tuple, Optional, Dict, Any, Union
 
@@ -5,12 +30,110 @@ import pandas as pd
 
 
 # ------------------------------------------------------------
+# 0) Errori
+# ------------------------------------------------------------
+
+class DSLError(ValueError):
+    """Errore di sintassi nel DSL. `line_no` e' 1-based (None se non applicabile)."""
+
+    def __init__(self, message: str, line_no: Optional[int] = None, line: str = ""):
+        self.message = message
+        self.line_no = line_no
+        self.line = line
+        where = f"riga {line_no}: " if line_no else ""
+        snippet = f"  →  «{line.strip()}»" if line.strip() else ""
+        super().__init__(f"{where}{message}{snippet}")
+
+
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().lower() in ("", "nan", "none", "<na>")
+
+
+# ------------------------------------------------------------
 # 1) Espansione dei repeat mantenendo la struttura
 # ------------------------------------------------------------
 
+_TAB_WIDTH = 2  # un tab vale un livello di indentazione (2 spazi)
+
+
 def _count_leading_spaces(s: str) -> int:
-    """Conta gli spazi iniziali in una stringa."""
+    """Conta gli spazi iniziali in una stringa (i tab valgono 2 spazi)."""
+    s = s.replace("\t", " " * _TAB_WIDTH)
     return len(s) - len(s.lstrip(" "))
+
+
+_REPEAT_RE = re.compile(r"^repeat\s+(-?\d+)\s*:?\s*$", re.IGNORECASE)
+
+
+def _parse_structure(steps_text: str) -> List[Any]:
+    """
+    Converte il testo in una struttura annidata.
+    Gli step normali sono tuple (line_no, testo); i blocchi repeat sono
+    dict {"repeat": N, "steps": [...], "line_no": n}.
+    Solleva DSLError su indentazione incoerente o repeat vuoti.
+    """
+    lines = []
+    for i, raw in enumerate(str(steps_text).splitlines(), start=1):
+        if raw.strip() == "" or raw.strip().startswith("#"):
+            continue
+        lines.append((i, _count_leading_spaces(raw), raw.strip(), raw))
+
+    if not lines:
+        raise DSLError("la colonna Steps e' vuota")
+
+    pos = 0
+
+    def parse_block(indent: int) -> List[Any]:
+        nonlocal pos
+        items: List[Any] = []
+        while pos < len(lines):
+            line_no, ind, content, raw = lines[pos]
+            if ind < indent:
+                break
+            if ind > indent:
+                raise DSLError("indentazione inattesa (la riga e' rientrata ma non e' dentro un 'repeat')",
+                               line_no, raw)
+            m = _REPEAT_RE.match(content)
+            if m:
+                reps = int(m.group(1))
+                if reps < 1:
+                    raise DSLError(f"numero di ripetizioni non valido ({reps})", line_no, raw)
+                pos += 1
+                if pos >= len(lines) or lines[pos][1] <= indent:
+                    raise DSLError("'repeat' senza step: rientra gli step sotto il repeat", line_no, raw)
+                child_indent = lines[pos][1]
+                children = parse_block(child_indent)
+                items.append({"repeat": reps, "steps": children, "line_no": line_no})
+                continue
+            if content.lower().startswith("repeat"):
+                raise DSLError("sintassi repeat non valida: usa 'repeat N:'", line_no, raw)
+            items.append((line_no, content))
+            pos += 1
+        return items
+
+    first_indent = lines[0][1]
+    result = parse_block(first_indent)
+    if pos < len(lines):  # righe meno rientrate della prima
+        line_no, _, _, raw = lines[pos]
+        raise DSLError("indentazione incoerente rispetto alla prima riga", line_no, raw)
+    return result
+
+
+def _strip_line_numbers(items: List[Any]) -> List[Union[str, Dict[str, Any]]]:
+    out: List[Any] = []
+    for it in items:
+        if isinstance(it, dict):
+            out.append({"repeat": it["repeat"], "steps": _strip_line_numbers(it["steps"])})
+        else:
+            out.append(it[1])
+    return out
 
 
 def expand_repeat_lines(steps_text: str) -> List[Union[str, Dict[str, Any]]]:
@@ -18,102 +141,83 @@ def expand_repeat_lines(steps_text: str) -> List[Union[str, Dict[str, Any]]]:
     Prende il testo degli steps e ritorna una lista mista:
     - Stringhe per step normali
     - Dict {"repeat": N, "steps": [...]} per blocchi repeat
+    Solleva DSLError se la struttura non e' valida.
     """
-    raw_lines = steps_text.splitlines()
-    while raw_lines and not raw_lines[-1].strip():
-        raw_lines.pop()
-    
-    expanded, _ = _expand_block_structured(raw_lines, 0, 0)
-    return expanded
-
-
-def _expand_block_structured(lines: List[str], start: int, indent: int) -> Tuple[List[Any], int]:
-    """Espande ricorsivamente mantenendo la struttura repeat."""
-    result: List[Any] = []
-    i = start
-
-    while i < len(lines):
-        raw = lines[i]
-        if not raw.strip():
-            i += 1
-            continue
-
-        current_indent = _count_leading_spaces(raw)
-        if current_indent < indent:
-            break
-        if current_indent > indent:
-            i += 1
-            continue
-
-        content = raw[indent:].rstrip()
-
-        # repeat N:
-        m = re.match(r"^repeat\s+(\d+)\s*:\s*$", content, flags=re.IGNORECASE)
-        if m:
-            reps = int(m.group(1))
-            child_steps, new_i = _expand_block_structured(lines, i + 1, indent + 2)
-            result.append({
-                "repeat": reps,
-                "steps": child_steps
-            })
-            i = new_i
-            continue
-
-        # Riga normale
-        result.append(content)
-        i += 1
-
-    return result, i
+    return _strip_line_numbers(_parse_structure(steps_text))
 
 
 # ------------------------------------------------------------
 # 2) Parse durata
 # ------------------------------------------------------------
 
-def parse_duration_part(base_str: str) -> Tuple[str, Optional[float], Optional[str]]:
+_NUM = r"(\d+(?:[.,]\d+)?)"
+
+
+def _num(s: str) -> float:
+    return float(s.replace(",", "."))
+
+
+def parse_duration_strict(base_str: str) -> Tuple[str, Optional[float], Optional[str]]:
     """
-    Parsea la parte prima di '@' per ricavare:
-      - tipo condizione ('time' o 'distance' o 'lap.button')
-      - valore numerico (secondi o metri)
-      - unitÃƒÂ  preferita
+    Parsea la durata/distanza di uno step.
+    Ritorna (tipo condizione, valore in secondi o metri, unita' preferita).
+    Solleva ValueError se il formato non e' riconosciuto.
     """
     s = base_str.strip().lower()
 
-    # lap-button
-    if "lap-button" in s or "lap button" in s:
+    if not s:
+        raise ValueError("durata mancante (es. 10min, 1km, 400m, lap-button)")
+
+    if s in ("lap-button", "lap button", "lap", "lapbutton"):
         return "lap.button", None, None
 
-    # ORDINE IMPORTANTE: distanze PRIMA di tempi per evitare confusione tra "m" (metri) e "m" (minuti abbreviato)
-    
-    # Metri: "1000m", "200m", "1500 m" - DEVE essere prima di "min"
-    # IMPORTANTE: negative lookahead (?!i) per NON catturare "min" come metri
-    m = re.match(r"^(\d+(?:\.\d+)?)\s*m(?!i)(?:\s|$)", s)
+    # Metri: "1000m", "200 m", "400mt"  (NB: "m" = METRI, i minuti si scrivono "min")
+    m = re.match(rf"^{_NUM}\s*(?:m|mt|metri|meters?)$", s)
     if m:
-        meters = float(m.group(1))
-        return "distance", meters, "meter"
-    
-    # Chilometri: "5km", "5 km", "1.5km"
-    m = re.match(r"^(\d+(?:\.\d+)?)\s*km(?:\s|$)", s)
-    if m:
-        km = float(m.group(1))
-        meters = km * 1000.0
-        return "distance", meters, "kilometer"
+        return "distance", _num(m.group(1)), "meter"
 
-    # ORA i tempi
-    # Minuti: "10min", "10 min", "40'", "35 '"
-    m = re.match(r"^(\d+)\s*(?:min|'|Ã¢â‚¬Â²)(?:\s|$)", s)
+    # Chilometri: "5km", "1.5 km"
+    m = re.match(rf"^{_NUM}\s*km$", s)
     if m:
-        minutes = int(m.group(1))
-        return "time", float(minutes * 60), None
+        return "distance", _num(m.group(1)) * 1000.0, "kilometer"
 
-    # Secondi: "30sec", "30s", "30 s"
-    m = re.match(r"^(\d+)\s*(?:sec|s)(?:\s|$)", s)
+    # Ore: "1h", "1.5 h", "2 ore"
+    m = re.match(rf"^{_NUM}\s*(?:h|hr|ora|ore|hours?)$", s)
     if m:
-        seconds = int(m.group(1))
-        return "time", float(seconds), None
+        return "time", _num(m.group(1)) * 3600.0, None
 
-    # fallback
-    return "time", 60.0, None
+    # Minuti: "10min", "10 min", "1.5min", "10'", "10′", "10 minuti"
+    m = re.match(rf"^{_NUM}\s*(?:min|mins|minuti|minutes?|'|′|’)$", s)
+    if m:
+        return "time", _num(m.group(1)) * 60.0, None
+
+    # Secondi: "30sec", "30s", "30\"", "30″", "30 secondi"
+    m = re.match(rf"^{_NUM}\s*(?:s|sec|secs|secondi|seconds?|\"|″|”|'')$", s)
+    if m:
+        return "time", _num(m.group(1)), None
+
+    # mm:ss oppure h:mm:ss
+    m = re.match(r"^(?:(\d+):)?(\d{1,2}):(\d{2})$", s)
+    if m:
+        h = int(m.group(1) or 0)
+        mi = int(m.group(2))
+        sec = int(m.group(3))
+        if sec >= 60 or (m.group(1) and mi >= 60):
+            raise ValueError(f"durata non valida '{base_str.strip()}'")
+        return "time", float(h * 3600 + mi * 60 + sec), None
+
+    raise ValueError(
+        f"durata non riconosciuta '{base_str.strip()}' "
+        "(usa es. 10min, 30sec, 1h, 1:30, 400m, 5km, lap-button)"
+    )
+
+
+def parse_duration_part(base_str: str) -> Tuple[str, Optional[float], Optional[str]]:
+    """Versione tollerante (compatibilita'): in caso di errore ritorna 60 secondi."""
+    try:
+        return parse_duration_strict(base_str)
+    except ValueError:
+        return "time", 60.0, None
 
 
 # ------------------------------------------------------------
@@ -150,20 +254,27 @@ TARGET_TYPE_IDS = {
     'pace.zone': 6,
 }
 
+# parola chiave DSL -> stepTypeKey Garmin
+_STEP_KEYWORDS = {
+    "warmup": "warmup", "riscaldamento": "warmup",
+    "cooldown": "cooldown", "defaticamento": "cooldown",
+    "interval": "interval", "step": "interval", "run": "interval",
+    "bike": "interval", "swim": "interval", "active": "interval",
+    "recovery": "recovery", "recover": "recovery", "recupero": "recovery",
+    "rest": "rest", "riposo": "rest",
+}
+
+
+# Se Garmin rifiutasse gli step di tipo "rest", metti False per tornare al
+# comportamento precedente (rest inviato come recovery).
+REST_AS_REST = True
+
 
 def map_step_type(step_key: str) -> Dict[str, Any]:
     """Mappa la parola chiave DSL al stepType Garmin."""
-    k = step_key.strip().lower()
-    
-    if k == "warmup":
-        type_key = "warmup"
-    elif k == "cooldown":
-        type_key = "cooldown"
-    elif k in ("recovery", "rest"):
+    type_key = _STEP_KEYWORDS.get(step_key.strip().lower(), "interval")
+    if type_key == "rest" and not REST_AS_REST:
         type_key = "recovery"
-    else:
-        type_key = "interval"
-    
     return {
         "stepTypeId": STEP_TYPE_IDS[type_key],
         "stepTypeKey": type_key
@@ -174,53 +285,56 @@ def map_step_type(step_key: str) -> Dict[str, Any]:
 # 4) Funzioni helper per Parameters
 # ------------------------------------------------------------
 
+def get_parameter_value(key: str, df_parameters: Optional[pd.DataFrame] = None) -> Optional[str]:
+    """Cerca un parametro nel foglio Parameters (senza distinzione maiuscole/minuscole)."""
+    if df_parameters is None or "Key" not in df_parameters.columns:
+        return None
+    keys = df_parameters["Key"].astype(str).str.strip().str.lower()
+    param_row = df_parameters[keys == str(key).strip().lower()]
+    if not param_row.empty:
+        val = param_row.iloc[0]["Expression"]
+        if _is_blank(val):
+            return None
+        return str(val).strip()
+    return None
+
+
+def _get_float_param(key: str, df_parameters: Optional[pd.DataFrame], default):
+    expr = get_parameter_value(key, df_parameters)
+    if expr is not None:
+        try:
+            return float(expr)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+
 def get_pace_tolerance(df_parameters: Optional[pd.DataFrame] = None) -> float:
     """Legge pace_tolerance da Parameters (default: 10 sec)."""
-    if df_parameters is not None:
-        tolerance_row = df_parameters[df_parameters['Key'] == 'pace_tolerance']
-        if not tolerance_row.empty:
-            expr = str(tolerance_row.iloc[0]['Expression']).strip()
-            try:
-                return float(expr)
-            except (ValueError, TypeError):
-                pass
-    return 10.0
+    return _get_float_param('pace_tolerance', df_parameters, 10.0)
 
 
 def get_hr_tolerance(df_parameters: Optional[pd.DataFrame] = None) -> float:
     """Legge hr_tolerance da Parameters (default: 5 bpm)."""
-    if df_parameters is not None:
-        tolerance_row = df_parameters[df_parameters['Key'] == 'hr_tolerance']
-        if not tolerance_row.empty:
-            expr = str(tolerance_row.iloc[0]['Expression']).strip()
-            try:
-                return float(expr)
-            except (ValueError, TypeError):
-                pass
-    return 5.0
+    return _get_float_param('hr_tolerance', df_parameters, 5.0)
 
 
 def get_hr_max(df_parameters: Optional[pd.DataFrame] = None) -> Optional[float]:
     """Legge HR_max da Parameters."""
-    if df_parameters is not None:
-        hr_max_row = df_parameters[df_parameters['Key'] == 'HR_max']
-        if not hr_max_row.empty:
-            expr = str(hr_max_row.iloc[0]['Expression']).strip()
-            try:
-                return float(expr)
-            except (ValueError, TypeError):
-                pass
-    return None
+    return _get_float_param('HR_max', df_parameters, None)
 
 
-def get_parameter_value(key: str, df_parameters: Optional[pd.DataFrame] = None) -> Optional[str]:
-    """Cerca un parametro nel DataFrame Parameters."""
-    if df_parameters is None:
-        return None
-    param_row = df_parameters[df_parameters['Key'] == key]
-    if not param_row.empty:
-        return str(param_row.iloc[0]['Expression']).strip()
-    return None
+def parse_single_pace(s: str) -> float:
+    """Parsea singolo valore di ritmo: '5:00' -> 300 sec."""
+    s = s.strip()
+    if ':' in s:
+        parts = s.split(':')
+        if len(parts) == 2:
+            mi, sec = int(parts[0]), int(parts[1])
+            if sec >= 60:
+                raise ValueError(f"ritmo non valido '{s}' (i secondi devono essere < 60)")
+            return float(mi * 60 + sec)
+    return float(s)
 
 
 def parse_pace_expression(expr: str) -> Tuple[float, Optional[float]]:
@@ -240,15 +354,6 @@ def parse_pace_expression(expr: str) -> Tuple[float, Optional[float]]:
     return (parse_single_pace(expr), None)
 
 
-def parse_single_pace(s: str) -> float:
-    """Parsea singolo valore di ritmo: '5:00' -> 300 sec."""
-    if ':' in s:
-        parts = s.split(':')
-        if len(parts) == 2:
-            return float(int(parts[0]) * 60 + int(parts[1]))
-    return float(s)
-
-
 def pace_seconds_to_mps(pace_seconds: float) -> float:
     """Converte sec/km a m/s: 300 sec/km -> 3.33 m/s."""
     return 1000.0 / pace_seconds if pace_seconds > 0 else 1.0
@@ -257,96 +362,57 @@ def pace_seconds_to_mps(pace_seconds: float) -> float:
 def parse_hr_expression(expr: str, df_parameters: Optional[pd.DataFrame] = None) -> Tuple[float, Optional[float]]:
     """
     Parsea espressione HR: '150', '150-165', '80%', '70-85%'
-    Se sono percentuali, usa HR_max da Parameters.
+    Se sono percentuali, usa HR_max da Parameters. Il risultato e' ordinato (min, max).
     """
     expr = expr.strip()
-    
-    # Percentuale singola: "80%"
+
     m = re.match(r"^(\d+(?:\.\d+)?)%$", expr)
     if m:
         pct = float(m.group(1))
         hr_max = get_hr_max(df_parameters)
-        if hr_max:
-            hr_value = hr_max * (pct / 100.0)
-            # Singolo valore: applica hr_tolerance
-            tolerance = get_hr_tolerance(df_parameters)
-            return (hr_value - tolerance, hr_value + tolerance)
-        else:
-            # Fallback se HR_max non definito
-            return (150.0, 160.0)
-    
-    # Range percentuale: "70-85%"
-    m = re.match(r"^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)%$", expr)
+        if not hr_max:
+            raise ValueError("zona FC in percentuale ma HR_max non e' definito in Parameters")
+        hr_value = hr_max * (pct / 100.0)
+        tolerance = get_hr_tolerance(df_parameters)
+        return (hr_value - tolerance, hr_value + tolerance)
+
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)%$", expr)
     if m:
-        pct_min = float(m.group(1))
-        pct_max = float(m.group(2))
+        pct_min, pct_max = sorted((float(m.group(1)), float(m.group(2))))
         hr_max = get_hr_max(df_parameters)
-        if hr_max:
-            hr_min = hr_max * (pct_min / 100.0)
-            hr_max_val = hr_max * (pct_max / 100.0)
-            return (hr_min, hr_max_val)
-        else:
-            # Fallback
-            return (140.0, 170.0)
-    
-    # Range assoluto: "150-165"
+        if not hr_max:
+            raise ValueError("zona FC in percentuale ma HR_max non e' definito in Parameters")
+        return (hr_max * (pct_min / 100.0), hr_max * (pct_max / 100.0))
+
     if '-' in expr:
         parts = expr.split('-')
         if len(parts) == 2:
-            return (float(parts[0]), float(parts[1]))
-    
-    # Singolo valore assoluto: "150"
+            a, b = sorted((float(parts[0]), float(parts[1])))
+            return (a, b)
+
     hr_value = float(expr)
     tolerance = get_hr_tolerance(df_parameters)
     return (hr_value - tolerance, hr_value + tolerance)
 
 
-
-
 def parse_power_expression(expr: str) -> Tuple[float, Optional[float]]:
-    """
-    Parsea espressione potenza: '250W', '200-250W', '250'
-    Returns: (power1, power2) oppure (power, None) se singolo valore
-    """
-    expr = expr.strip().upper()
-    expr = expr.replace('W', '')
-    
+    """Parsea espressione potenza: '250W', '200-250W', '250'."""
+    expr = expr.strip().upper().replace('W', '')
     if '-' in expr:
         parts = expr.split('-')
         if len(parts) == 2:
-            try:
-                return (float(parts[0]), float(parts[1]))
-            except ValueError:
-                pass
-    
-    try:
-        power = float(expr)
-        return (power, None)
-    except ValueError:
-        return (200.0, None)
+            return (float(parts[0]), float(parts[1]))
+    return (float(expr), None)
 
 
 def parse_cadence_expression(expr: str) -> Tuple[float, Optional[float]]:
-    """
-    Parsea espressione cadenza: '90rpm', '85-95rpm', '90'
-    Returns: (cadence1, cadence2) oppure (cadence, None) se singolo valore
-    """
-    expr = expr.strip().lower()
-    expr = expr.replace('rpm', '')
-    
+    """Parsea espressione cadenza: '90rpm', '85-95rpm', '90'."""
+    expr = expr.strip().lower().replace('rpm', '')
     if '-' in expr:
         parts = expr.split('-')
         if len(parts) == 2:
-            try:
-                return (float(parts[0]), float(parts[1]))
-            except ValueError:
-                pass
-    
-    try:
-        cadence = float(expr)
-        return (cadence, None)
-    except ValueError:
-        return (80.0, None)
+            return (float(parts[0]), float(parts[1]))
+    return (float(expr), None)
 
 
 def parse_swim_pace_expression(expr: str, df_parameters: Optional[pd.DataFrame] = None) -> Tuple[float, Optional[float]]:
@@ -354,9 +420,8 @@ def parse_swim_pace_expression(expr: str, df_parameters: Optional[pd.DataFrame] 
     Parsea espressione pace nuoto (min:sec per 100m): '1:45', '1:40-1:50'
     Converte in m/s per API Garmin.
     """
-    expr = expr.strip()
-    
-    # Range: "1:40-1:50"
+    expr = expr.strip().lower().replace("/100m", "").strip()
+
     if '-' in expr and ':' in expr:
         parts = expr.split('-')
         if len(parts) == 2:
@@ -365,344 +430,230 @@ def parse_swim_pace_expression(expr: str, df_parameters: Optional[pd.DataFrame] 
             mps1 = 100.0 / pace1_sec if pace1_sec > 0 else 1.0
             mps2 = 100.0 / pace2_sec if pace2_sec > 0 else 1.0
             return (min(mps1, mps2), max(mps1, mps2))
-    
-    # Singolo valore: "1:45"
+
     if ':' in expr:
         pace_sec = parse_single_pace(expr)
         tolerance_param = get_parameter_value('swim_tolerance', df_parameters)
         tolerance = float(tolerance_param) if tolerance_param else 5.0
-        
         slower_sec = pace_sec + tolerance
         faster_sec = pace_sec - tolerance
         slower_mps = 100.0 / slower_sec if slower_sec > 0 else 1.0
         faster_mps = 100.0 / faster_sec if faster_sec > 0 else 1.0
         return (slower_mps, faster_mps)
-    
-    return (1.2, 1.4)
+
+    raise ValueError(f"ritmo nuoto non valido '{expr}' (usa es. 1:45 o 1:40-1:50)")
 
 
 # ------------------------------------------------------------
 # 5) Parse target
 # ------------------------------------------------------------
 
-def parse_target(target_str: str, df_parameters: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+def _target(key: str, one=None, two=None, zone=None) -> Dict[str, Any]:
+    return {
+        "targetType": {
+            "workoutTargetTypeId": TARGET_TYPE_IDS[key],
+            "workoutTargetTypeKey": key,
+        },
+        "targetValueOne": one,
+        "targetValueTwo": two,
+        "zoneNumber": zone,
+    }
+
+
+def _no_target() -> Dict[str, Any]:
+    return _target("no.target")
+
+
+def _pace_target_from_expr(expr: str, df_parameters) -> Dict[str, Any]:
+    min_sec, max_sec = parse_pace_expression(expr)
+    if max_sec is None:
+        tolerance_sec = get_pace_tolerance(df_parameters)
+        slower_mps = pace_seconds_to_mps(min_sec + tolerance_sec)
+        faster_mps = pace_seconds_to_mps(min_sec - tolerance_sec)
+    else:
+        slower_mps = pace_seconds_to_mps(max(min_sec, max_sec))
+        faster_mps = pace_seconds_to_mps(min(min_sec, max_sec))
+    return _target("pace.zone", slower_mps, faster_mps)
+
+
+def parse_target_strict(target_str: str, df_parameters: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     """
-    Parsea il target dopo '@'.
-    Supporta: ritmo (5:00, Z1-Z5, custom), HR (HR1-HR5, 140-160bpm), potenza, cadenza.
+    Parsea il target dopo '@'. Solleva ValueError se il target non e' riconosciuto.
+    Supporta: ritmo (5:00, 5:00-5:30, Z1-Z5, chiavi custom), FC (HR_Z1-5, 140-160),
+    potenza (200W, Power_Z*), cadenza (90rpm, Cadence_*), nuoto (1:45/100m, Swim_*).
     """
-    s = target_str.strip().lower()
-    
-    if not s or s == "open":
-        return {
-            "targetType": {
-                "workoutTargetTypeId": TARGET_TYPE_IDS['no.target'],
-                "workoutTargetTypeKey": "no.target"
-            },
-            "targetValueOne": None,
-            "targetValueTwo": None,
-            "zoneNumber": None
-        }
-    
-    # Zone di ritmo standard: Z1, Z2, Z3, Z4, Z5
-    m = re.match(r"^z(\d)$", s)
+    raw = target_str.strip()
+    s = raw.lower()
+
+    if not s or s in ("open", "libero", "none"):
+        return _no_target()
+
+    # Zone di ritmo: Z1..Z5
+    m = re.match(r"^z(\d+)$", s)
     if m:
-        zone_num = m.group(1)
-        zone_key = f"Z{zone_num}"
-        zone_expr = get_parameter_value(zone_key, df_parameters)
-        
+        zone = int(m.group(1))
+        if not 1 <= zone <= 5:
+            raise ValueError(f"zona '{raw}' non valida (usa Z1-Z5)")
+        zone_expr = get_parameter_value(f"Z{zone}", df_parameters)
         if zone_expr:
-            min_sec, max_sec = parse_pace_expression(zone_expr)
-            
-            if max_sec is None:
-                # Singolo valore: applica pace_tolerance
-                tolerance_sec = get_pace_tolerance(df_parameters)
-                slower_sec = min_sec + tolerance_sec
-                faster_sec = min_sec - tolerance_sec
-                slower_mps = pace_seconds_to_mps(slower_sec)
-                faster_mps = pace_seconds_to_mps(faster_sec)
-            else:
-                # Range esplicito
-                slower_mps = pace_seconds_to_mps(max(min_sec, max_sec))
-                faster_mps = pace_seconds_to_mps(min(min_sec, max_sec))
-            
-            return {
-                "targetType": {
-                    "workoutTargetTypeId": TARGET_TYPE_IDS['pace.zone'],
-                    "workoutTargetTypeKey": "pace.zone"
-                },
-                "targetValueOne": slower_mps,
-                "targetValueTwo": faster_mps,
-                "zoneNumber": None
-            }
-        else:
-            # Usa zone Garmin predefinite
-            zone = int(zone_num)
-            return {
-                "targetType": {
-                    "workoutTargetTypeId": TARGET_TYPE_IDS['pace.zone'],
-                    "workoutTargetTypeKey": "pace.zone"
-                },
-                "targetValueOne": None,
-                "targetValueTwo": None,
-                "zoneNumber": zone
-            }
-    
-    # Zone HR: HR1, HR2, HR_Z1, etc.
-    m = re.match(r"^hr[_]?z?(\d)$", s)
+            return _pace_target_from_expr(zone_expr, df_parameters)
+        return _target("pace.zone", zone=zone)  # zone Garmin predefinite
+
+    # Zone FC: HR1, HR_Z1, HRZ1
+    m = re.match(r"^hr[_]?z?(\d+)$", s)
     if m:
-        zone_num = m.group(1)
-        for zone_key in [f"HR{zone_num}", f"HR_Z{zone_num}", f"HRZ{zone_num}"]:
+        zone = int(m.group(1))
+        if not 1 <= zone <= 5:
+            raise ValueError(f"zona FC '{raw}' non valida (usa HR_Z1-HR_Z5)")
+        for zone_key in (f"HR{zone}", f"HR_Z{zone}", f"HRZ{zone}"):
             zone_expr = get_parameter_value(zone_key, df_parameters)
             if zone_expr:
                 min_hr, max_hr = parse_hr_expression(zone_expr, df_parameters)
-                return {
-                    "targetType": {
-                        "workoutTargetTypeId": TARGET_TYPE_IDS['heart.rate.zone'],
-                        "workoutTargetTypeKey": "heart.rate.zone"
-                    },
-                    "targetValueOne": min_hr,
-                    "targetValueTwo": max_hr,
-                    "zoneNumber": None
-                }
-        
-        zone = int(zone_num)
-        return {
-            "targetType": {
-                "workoutTargetTypeId": TARGET_TYPE_IDS['heart.rate.zone'],
-                "workoutTargetTypeKey": "heart.rate.zone"
-            },
-            "targetValueOne": None,
-            "targetValueTwo": None,
-            "zoneNumber": zone
-        }
-    
+                return _target("heart.rate.zone", min_hr, max_hr)
+        return _target("heart.rate.zone", zone=zone)
+
     # Ritmo assoluto: "5:00" o "5:00-5:30"
-    m = re.match(r"^(\d+):(\d+)(?:-(\d+):(\d+))?$", s)
+    m = re.match(r"^(\d+):(\d+)(?:\s*-\s*(\d+):(\d+))?$", s)
     if m:
-        min1 = int(m.group(1))
-        sec1 = int(m.group(2))
-        total_sec = min1 * 60 + sec1
-        
-        if m.group(3) and m.group(4):
-            # Range
-            min2 = int(m.group(3))
-            sec2 = int(m.group(4))
-            total_sec2 = min2 * 60 + sec2
-            pace1_mps = pace_seconds_to_mps(total_sec)
-            pace2_mps = pace_seconds_to_mps(total_sec2)
-            
-            return {
-                "targetType": {
-                    "workoutTargetTypeId": TARGET_TYPE_IDS['pace.zone'],
-                    "workoutTargetTypeKey": "pace.zone"
-                },
-                "targetValueOne": min(pace1_mps, pace2_mps),
-                "targetValueTwo": max(pace1_mps, pace2_mps),
-                "zoneNumber": None
-            }
-        else:
-            # Singolo valore: applica pace_tolerance
-            tolerance_sec = get_pace_tolerance(df_parameters)
-            slower_sec = total_sec + tolerance_sec
-            faster_sec = total_sec - tolerance_sec
-            slower_mps = pace_seconds_to_mps(slower_sec)
-            faster_mps = pace_seconds_to_mps(faster_sec)
-            
-            return {
-                "targetType": {
-                    "workoutTargetTypeId": TARGET_TYPE_IDS['pace.zone'],
-                    "workoutTargetTypeKey": "pace.zone"
-                },
-                "targetValueOne": slower_mps,
-                "targetValueTwo": faster_mps,
-                "zoneNumber": None
-            }
-    
-    # ========== MULTI-SPORT TARGETS ==========
-    
-    # Zone POTENZA: Power_Z1, Power_Z2, etc.
-    m = re.match(r"^power[_]?z(\d)$", s)
-    if m:
-        zone_num = m.group(1)
-        zone_key = f"Power_Z{zone_num}"
-        zone_expr = get_parameter_value(zone_key, df_parameters)
-        
-        if zone_expr:
-            power1, power2 = parse_power_expression(zone_expr)
-            if power2 is None:
-                # Singolo valore: aggiungi 5% tolleranza
-                power2 = power1 * 1.05
-            
-            return {
-                "targetType": {
-                    "workoutTargetTypeId": TARGET_TYPE_IDS['power.zone'],
-                    "workoutTargetTypeKey": "power.zone"
-                },
-                "targetValueOne": power1,
-                "targetValueTwo": power2,
-                "zoneNumber": None
-            }
-    
-    # Zone CADENZA: Cadence_Easy, Cadence_Tempo, Cadence_Sprint, etc.
+        if int(m.group(2)) >= 60 or (m.group(4) and int(m.group(4)) >= 60):
+            raise ValueError(f"ritmo '{raw}' non valido (i secondi devono essere < 60)")
+        total_sec = int(m.group(1)) * 60 + int(m.group(2))
+        if m.group(3):
+            total_sec2 = int(m.group(3)) * 60 + int(m.group(4))
+            p1, p2 = pace_seconds_to_mps(total_sec), pace_seconds_to_mps(total_sec2)
+            return _target("pace.zone", min(p1, p2), max(p1, p2))
+        tolerance_sec = get_pace_tolerance(df_parameters)
+        return _target("pace.zone",
+                       pace_seconds_to_mps(total_sec + tolerance_sec),
+                       pace_seconds_to_mps(total_sec - tolerance_sec))
+
+    # Ritmo nuoto diretto: "1:45/100m" o "1:40-1:50/100m"
+    if s.endswith("/100m"):
+        mps1, mps2 = parse_swim_pace_expression(s, df_parameters)
+        return _target("pace.zone", mps1, mps2)
+
+    # Zone POTENZA: Power_Z1 ...
+    if re.match(r"^power[_]?z(\d)$", s):
+        zone_expr = get_parameter_value(s.replace("powerz", "power_z"), df_parameters) \
+            or get_parameter_value(s, df_parameters)
+        if not zone_expr:
+            raise ValueError(f"'{raw}' non e' definito nel foglio Parameters")
+        power1, power2 = parse_power_expression(zone_expr)
+        if power2 is None:
+            power2 = power1 * 1.05
+        return _target("power.zone", power1, power2)
+
+    # Cadenza custom: Cadence_Easy ...
     if s.startswith('cadence'):
         custom_cadence = get_parameter_value(s, df_parameters)
-        if custom_cadence:
-            cad1, cad2 = parse_cadence_expression(custom_cadence)
-            if cad2 is None:
-                cad2 = cad1 + 5  # Range di 5 rpm
-            
-            return {
-                "targetType": {
-                    "workoutTargetTypeId": TARGET_TYPE_IDS['cadence'],
-                    "workoutTargetTypeKey": "cadence"
-                },
-                "targetValueOne": cad1,
-                "targetValueTwo": cad2,
-                "zoneNumber": None
-            }
-    
-    # Zone SWIM PACE: Swim_Z1, Swim_Z2, swim_easy, swim_threshold, etc.
+        if not custom_cadence:
+            raise ValueError(f"'{raw}' non e' definito nel foglio Parameters")
+        cad1, cad2 = parse_cadence_expression(custom_cadence)
+        if cad2 is None:
+            cad2 = cad1 + 5
+        return _target("cadence", cad1, cad2)
+
+    # Nuoto custom: Swim_Z2, swim_easy ...
     if s.startswith('swim'):
         custom_swim = get_parameter_value(s, df_parameters)
-        if custom_swim:
-            mps1, mps2 = parse_swim_pace_expression(custom_swim, df_parameters)
-            
-            return {
-                "targetType": {
-                    "workoutTargetTypeId": TARGET_TYPE_IDS['pace.zone'],
-                    "workoutTargetTypeKey": "pace.zone"
-                },
-                "targetValueOne": mps1,
-                "targetValueTwo": mps2,
-                "zoneNumber": None
-            }
-    
-    # NUOVO: Parametri custom di ritmo (recovery, marathon, threshold, easy_range, ecc.)
-    # Cerca qualsiasi parametro in Parameters che non sia giÃƒÆ’Ã‚Â  stato gestito
+        if not custom_swim:
+            raise ValueError(f"'{raw}' non e' definito nel foglio Parameters")
+        mps1, mps2 = parse_swim_pace_expression(custom_swim, df_parameters)
+        return _target("pace.zone", mps1, mps2)
+
+    # Parametri custom di ritmo (easy_range, hmp, threshold, ...)
     custom_pace = get_parameter_value(s, df_parameters)
     if custom_pace:
-        # Trovato un parametro custom, prova a parsarlo come ritmo
         try:
-            min_sec, max_sec = parse_pace_expression(custom_pace)
-            
-            if max_sec is None:
-                # Singolo valore: applica pace_tolerance
-                tolerance_sec = get_pace_tolerance(df_parameters)
-                slower_sec = min_sec + tolerance_sec
-                faster_sec = min_sec - tolerance_sec
-                slower_mps = pace_seconds_to_mps(slower_sec)
-                faster_mps = pace_seconds_to_mps(faster_sec)
-            else:
-                # Range esplicito
-                slower_mps = pace_seconds_to_mps(max(min_sec, max_sec))
-                faster_mps = pace_seconds_to_mps(min(min_sec, max_sec))
-            
-            return {
-                "targetType": {
-                    "workoutTargetTypeId": TARGET_TYPE_IDS['pace.zone'],
-                    "workoutTargetTypeKey": "pace.zone"
-                },
-                "targetValueOne": slower_mps,
-                "targetValueTwo": faster_mps,
-                "zoneNumber": None
-            }
-        except:
-            pass  # Se non riesce a parsare, continua con gli altri check
-    
+            return _pace_target_from_expr(custom_pace, df_parameters)
+        except ValueError:
+            raise ValueError(f"il parametro '{raw}' = '{custom_pace}' non e' un ritmo valido")
+
     # Potenza: "200W" o "200-250W"
-    m = re.match(r"^(\d+)(?:-(\d+))?w$", s)
+    m = re.match(r"^(\d+)(?:\s*-\s*(\d+))?\s*w$", s)
     if m:
         power1 = float(m.group(1))
         power2 = float(m.group(2)) if m.group(2) else power1 * 1.05
-        return {
-            "targetType": {
-                "workoutTargetTypeId": TARGET_TYPE_IDS['power.zone'],
-                "workoutTargetTypeKey": "power.zone"
-            },
-            "targetValueOne": power1,
-            "targetValueTwo": power2,
-            "zoneNumber": None
-        }
-    
+        return _target("power.zone", power1, power2)
+
     # Cadenza: "85rpm" o "85-90rpm"
-    m = re.match(r"^(\d+)(?:-(\d+))?rpm$", s)
+    m = re.match(r"^(\d+)(?:\s*-\s*(\d+))?\s*rpm$", s)
     if m:
         cadence1 = float(m.group(1))
         cadence2 = float(m.group(2)) if m.group(2) else cadence1 + 5
-        return {
-            "targetType": {
-                "workoutTargetTypeId": TARGET_TYPE_IDS['cadence'],
-                "workoutTargetTypeKey": "cadence"
-            },
-            "targetValueOne": cadence1,
-            "targetValueTwo": cadence2,
-            "zoneNumber": None
-        }
-    
-    # HR range: "140-160bpm" o "140-160"
-    m = re.match(r"^(\d+)(?:-(\d+))?(?:bpm)?$", s)
-    if m and int(m.group(1)) > 20:
+        return _target("cadence", cadence1, cadence2)
+
+    # FC assoluta: "140-160bpm", "140-160", "150"
+    m = re.match(r"^(\d+)(?:\s*-\s*(\d+))?\s*(?:bpm)?$", s)
+    if m:
         hr1 = float(m.group(1))
         hr2 = float(m.group(2)) if m.group(2) else hr1 + 10
-        return {
-            "targetType": {
-                "workoutTargetTypeId": TARGET_TYPE_IDS['heart.rate.zone'],
-                "workoutTargetTypeKey": "heart.rate.zone"
-            },
-            "targetValueOne": hr1,
-            "targetValueTwo": hr2,
-            "zoneNumber": None
-        }
-    
-    # Fallback
-    return {
-        "targetType": {
-            "workoutTargetTypeId": TARGET_TYPE_IDS['no.target'],
-            "workoutTargetTypeKey": "no.target"
-        },
-        "targetValueOne": None,
-        "targetValueTwo": None,
-        "zoneNumber": None
-    }
+        if min(hr1, hr2) < 30 or max(hr1, hr2) > 250:
+            raise ValueError(f"frequenza cardiaca '{raw}' fuori scala (30-250 bpm)")
+        return _target("heart.rate.zone", min(hr1, hr2), max(hr1, hr2))
+
+    raise ValueError(
+        f"target '{raw}' non riconosciuto: non e' un ritmo (5:00), una zona (Z1-Z5, HR_Z1-5) "
+        "ne' una chiave del foglio Parameters"
+    )
+
+
+def parse_target(target_str: str, df_parameters: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    """Versione tollerante (compatibilita'): target non riconosciuto -> nessun target."""
+    try:
+        return parse_target_strict(target_str, df_parameters)
+    except (ValueError, TypeError):
+        return _no_target()
 
 
 # ------------------------------------------------------------
 # 6) Parse singola riga di step
 # ------------------------------------------------------------
 
+_STEP_LINE_RE = re.compile(r"^([a-zA-Zàèéìòù]+)\s*:\s*(.*)$")
+
+
 def parse_step_line(
     line: str,
     order: int,
     df_parameters: Optional[pd.DataFrame] = None,
+    line_no: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Parsea una riga di step e ritorna un ExecutableStepDTO."""
+    """Parsea una riga di step e ritorna un ExecutableStepDTO. Solleva DSLError."""
     main_part = line.split("--", 1)[0].rstrip()
 
-    m = re.match(r"^(warmup|cooldown|interval|recovery|rest|step)\s*:\s*(.+)$",
-                 main_part, flags=re.IGNORECASE)
+    m = _STEP_LINE_RE.match(main_part.strip())
     if not m:
-        step_type_key = "interval"
-        base_and_target = main_part
-    else:
-        step_type_key = m.group(1).strip().lower()
-        base_and_target = m.group(2).strip()
+        raise DSLError("formato step non valido: usa 'tipo: durata @ target' "
+                       "(es. interval: 1km @ 5:00)", line_no, line)
+    step_type_key = m.group(1).strip().lower()
+    if step_type_key not in _STEP_KEYWORDS:
+        raise DSLError(f"tipo di step '{m.group(1)}' sconosciuto "
+                       "(usa warmup, interval, recovery, rest, cooldown)", line_no, line)
+    base_and_target = m.group(2).strip()
 
-    # Separa durata da target
     target_str = ""
     if "@" in base_and_target:
         base_str, target_str = base_and_target.split("@", 1)
         base_str = base_str.strip()
         target_str = target_str.strip()
+        if not target_str:
+            raise DSLError("'@' senza target", line_no, line)
     else:
         base_str = base_and_target.strip()
 
-    # Parse durata/distanza
-    condition_type_key, end_condition_value, preferred_unit_key = parse_duration_part(base_str)
+    try:
+        condition_type_key, end_condition_value, preferred_unit_key = parse_duration_strict(base_str)
+        if end_condition_value is not None and end_condition_value <= 0:
+            raise ValueError("la durata deve essere maggiore di zero")
+    except ValueError as e:
+        raise DSLError(str(e), line_no, line) from None
 
-    # Parse target
-    target_info = parse_target(target_str, df_parameters)
+    try:
+        target_info = parse_target_strict(target_str, df_parameters)
+    except (ValueError, TypeError) as e:
+        raise DSLError(str(e), line_no, line) from None
 
-    # Step base
     step: Dict[str, Any] = {
         "type": "ExecutableStepDTO",
         "stepId": None,
@@ -720,11 +671,9 @@ def parse_step_line(
         "zoneNumber": target_info["zoneNumber"],
     }
 
-    # Aggiungi endConditionValue solo se non ÃƒÂ¨ lap.button
     if end_condition_value is not None:
         step["endConditionValue"] = end_condition_value
-    
-    # Se distanza, aggiungi preferredEndConditionUnit
+
     if preferred_unit_key:
         unit_ids = {'meter': 1, 'kilometer': 2}
         step["preferredEndConditionUnit"] = {
@@ -742,9 +691,10 @@ def parse_step_line(
 
 def map_sport_type(row: pd.Series) -> Dict[str, Any]:
     """Mappa Sport in sportType Garmin."""
-    raw = str(row.get("Sport", "") or "").strip().lower()
+    raw_val = row.get("Sport", "")
+    raw = "" if _is_blank(raw_val) else str(raw_val).strip().lower()
     key = "running"
-    if "bike" in raw or "bici" in raw or "cycling" in raw:
+    if "bike" in raw or "bici" in raw or "cycling" in raw or "cicl" in raw:
         key = "cycling"
     elif "swim" in raw or "nuoto" in raw:
         key = "swimming"
@@ -765,44 +715,40 @@ def build_workout_steps(
     start_child_id: int = 1
 ) -> List[Dict[str, Any]]:
     """
-    Converte la lista strutturata in workout steps Garmin.
+    Converte la struttura (da _parse_structure o expand_repeat_lines) in workout steps Garmin.
     Gestisce sia ExecutableStepDTO che RepeatGroupDTO.
     """
     steps = []
     order = start_order
     child_id = start_child_id
-    
+
     for item in structured_steps:
         if isinstance(item, dict) and "repeat" in item:
-            # RepeatGroupDTO
-            repeat_count = item["repeat"]
             nested_steps = build_workout_steps(
                 item["steps"],
                 df_parameters,
-                start_order=1,  # Reset ordine dentro il repeat
+                start_order=1,
                 start_child_id=child_id + 1
             )
-            
-            repeat_step = {
+            steps.append({
                 "type": "RepeatGroupDTO",
                 "stepId": None,
                 "stepOrder": order,
-                "numberOfIterations": repeat_count,
+                "numberOfIterations": item["repeat"],
                 "smartRepeat": False,
                 "childStepId": child_id,
                 "workoutSteps": nested_steps
-            }
-            
-            steps.append(repeat_step)
+            })
             order += 1
             child_id += 1
-            
-        elif isinstance(item, str):
-            # ExecutableStepDTO
-            step = parse_step_line(item, order, df_parameters)
-            steps.append(step)
+        else:
+            if isinstance(item, tuple):
+                line_no, text = item
+            else:
+                line_no, text = None, item
+            steps.append(parse_step_line(text, order, df_parameters, line_no=line_no))
             order += 1
-    
+
     return steps
 
 
@@ -810,40 +756,45 @@ def build_workout_steps(
 # 9) Costruzione workout completo
 # ------------------------------------------------------------
 
+def _clean_int_str(value: Any) -> str:
+    if _is_blank(value):
+        return ""
+    if isinstance(value, float) and not math.isnan(value) and value.is_integer():
+        return str(int(value))
+    s = str(value).strip()
+    return s[:-2] if s.endswith(".0") else s
+
+
 def build_garmin_workout_from_excel_row(
     row: pd.Series,
     steps_text: str,
     df_parameters: Optional[pd.DataFrame] = None,
     use_prefix: bool = False,
 ) -> Dict[str, Any]:
-    """Costruisce il workout JSON Garmin da Excel."""
+    """Costruisce il workout JSON Garmin da una riga Excel. Solleva DSLError se gli step non sono validi."""
 
-    # Nome base dal campo Description
-    workout_name = str(row.get("Description", "") or "").strip()
+    desc = row.get("Description", "")
+    workout_name = "" if _is_blank(desc) else str(desc).strip()
     if not workout_name:
         workout_name = "Workout"
 
-    # Prefisso opzionale W{Week}S{Session}
     if use_prefix:
-        week = str(row.get("Week", "") or "").strip()
-        session = str(row.get("Session", "") or "").strip()
-
         parts = []
+        week = _clean_int_str(row.get("Week", ""))
+        session = _clean_int_str(row.get("Session", ""))
         if week:
             parts.append(f"W{week}")
         if session:
             parts.append(f"S{session}")
-
         if parts:
-            prefix = "".join(parts) + " - "
-            workout_name = prefix + workout_name
+            workout_name = "".join(parts) + " - " + workout_name
 
     sport_type = map_sport_type(row)
 
-    # Espande mantenendo struttura repeat
-    structured_steps = expand_repeat_lines(steps_text)
+    if _is_blank(steps_text):
+        raise DSLError("la colonna Steps e' vuota")
 
-    # Converti in workout steps Garmin
+    structured_steps = _parse_structure(steps_text)
     steps = build_workout_steps(structured_steps, df_parameters)
 
     segment = {
@@ -852,7 +803,7 @@ def build_garmin_workout_from_excel_row(
         "workoutSteps": steps,
     }
 
-    workout: Dict[str, Any] = {
+    return {
         "workoutId": None,
         "ownerId": None,
         "workoutName": workout_name,
@@ -861,4 +812,55 @@ def build_garmin_workout_from_excel_row(
         "workoutSegments": [segment],
     }
 
-    return workout
+
+# ------------------------------------------------------------
+# 10) Validazione di un intero piano (prima dell'upload)
+# ------------------------------------------------------------
+
+def _row_label(df_workouts: pd.DataFrame, idx: int) -> str:
+    row = df_workouts.iloc[idx]
+    parts = [f"Riga Excel {idx + 2}"]
+    week, session = _clean_int_str(row.get("Week", "")), _clean_int_str(row.get("Session", ""))
+    if week or session:
+        parts.append(f"W{week}S{session}")
+    desc = row.get("Description", "")
+    if not _is_blank(desc):
+        parts.append(f"«{str(desc).strip()[:40]}»")
+    return " ".join(parts)
+
+
+def _date_problem(value: Any) -> Optional[str]:
+    if _is_blank(value):
+        return "data mancante nella colonna Date"
+    try:
+        pd.to_datetime(value)
+        return None
+    except (ValueError, TypeError):
+        return f"data non valida nella colonna Date ({value})"
+
+
+def validate_workout_rows(
+    df_workouts: pd.DataFrame,
+    indices: List[int],
+    df_parameters: Optional[pd.DataFrame] = None,
+    require_date: bool = False,
+) -> List[str]:
+    """
+    Controlla i workout indicati (indici posizionali) senza contattare Garmin.
+    Ritorna una lista di messaggi d'errore leggibili (vuota se tutto e' valido).
+    """
+    errors: List[str] = []
+    for idx in indices:
+        row = df_workouts.iloc[idx]
+        label = _row_label(df_workouts, idx)
+        try:
+            build_garmin_workout_from_excel_row(row, row.get("Steps", ""), df_parameters)
+        except DSLError as e:
+            errors.append(f"{label}: {e}")
+        except Exception as e:  # errore inatteso: meglio mostrarlo che caricare dati sbagliati
+            errors.append(f"{label}: errore inatteso ({e})")
+        if require_date:
+            problem = _date_problem(row.get("Date", ""))
+            if problem:
+                errors.append(f"{label}: {problem}")
+    return errors

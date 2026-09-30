@@ -1,3 +1,6 @@
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # moduli nella cartella principale
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
@@ -13,6 +16,7 @@ except ImportError:
 
 from excel_utils import generate_training_excel, format_workbook_dates_and_steps
 from dsl_parser import expand_repeat_lines, build_garmin_workout_from_excel_row
+from gui_helpers import confirm_workouts_valid
 from garmin_service import GarminService
 from download_dialog import show_download_dialog
 
@@ -390,7 +394,7 @@ class TrainingPlannerGUI:
             self.df_workouts = pd.read_excel(path, sheet_name="Workouts")
 
             try:
-                # ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â° forza tutte le colonne di Parameters a stringa
+                # 👉 forza tutte le colonne di Parameters a stringa
                 self.df_parameters = pd.read_excel(
                     path,
                     sheet_name="Parameters",
@@ -519,7 +523,7 @@ class TrainingPlannerGUI:
             messagebox.showwarning(
                 "Autosalvataggio fallito",
                 f"Non riesco a salvare su:\n{self.excel_path}\n\nDettagli:\n{e}\n\n"
-                "Chiudi il file in Excel (se ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ aperto) e prova a salvare manualmente."
+                "Chiudi il file in Excel (se è aperto) e prova a salvare manualmente."
             )
 
     def populate_workouts_tree(self):
@@ -753,11 +757,12 @@ class TrainingPlannerGUI:
     def login_garmin_with_credentials(self):
         email = self.entry_email.get().strip()
         password = self.entry_password.get().strip()
+        self.entry_password.delete(0, "end")  # non lasciare la password nel campo
         if not email or not password:
             messagebox.showerror("Errore", "Inserisci email e password Garmin.")
             return
         try:
-            self.garmin.login_with_credentials(email, password)
+            self.garmin.login_with_credentials(email, password, parent=self.root)
             self.lbl_garmin_status.config(text="● Connesso", foreground="green")
             messagebox.showinfo("OK", "Login a Garmin Connect effettuato (sessione salvata).")
         except Exception as e:
@@ -767,6 +772,7 @@ class TrainingPlannerGUI:
     def login_garmin_with_session(self):
         try:
             self.garmin.login_with_saved_session()
+            self._warn_legacy_tokens()
             self.lbl_garmin_status.config(text="● Connesso", foreground="green")
             messagebox.showinfo("OK", "Login a Garmin Connect effettuato tramite sessione salvata.")
         except Exception as e:
@@ -796,6 +802,18 @@ class TrainingPlannerGUI:
                 indices.append(idx)
                 seen.add(idx)
         return indices
+
+    def _warn_legacy_tokens(self):
+        """Avvisa se la sessione e' stata migrata dalla vecchia cartella ./garminconnect."""
+        legacy = getattr(self.garmin, "migrated_from", None)
+        if legacy:
+            messagebox.showwarning(
+                "Sessione spostata",
+                "La sessione Garmin e' stata copiata nella nuova cartella sicura:\n"
+                "~/.garminplanner/tokens\n\n"
+                f"Cancella la vecchia cartella, che contiene i tuoi token:\n{legacy}\n\n"
+                "Se il progetto e' su GitHub, non deve mai essere caricata.",
+            )
 
     def _run_with_loading(self, operation_func, title="Operazione in corso..."):
         """
@@ -836,12 +854,20 @@ class TrainingPlannerGUI:
         else:
             messagebox.showerror("Errore", result["message"])
 
+        # Salva SEMPRE gli ID Garmin ottenuti finora (anche in caso di errore a meta'),
+        # cosi' un nuovo tentativo non crea workout duplicati.
+        self.autosave_to_loaded_excel()
+
     def upload_selected_workouts(self):
         if self.garmin.client is None:
             messagebox.showerror("Errore", "Non sei connesso a Garmin.")
             return
         idxs = self._get_selected_indices()
         if not idxs:
+            return
+
+        # Controlla tutti gli step PRIMA di contattare Garmin
+        if not confirm_workouts_valid(self.root, self.df_workouts, idxs, self.df_parameters, require_date=False):
             return
 
         def operation(loading):
@@ -867,7 +893,6 @@ class TrainingPlannerGUI:
                     created_ids.append(workout_id)
                     self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
 
-            self.root.after(0, self.autosave_to_loaded_excel)
             return True, f"Creati {len(created_ids)} workout su Garmin."
         
         self._run_with_loading(operation, "Caricamento workout su Garmin")
@@ -906,6 +931,10 @@ class TrainingPlannerGUI:
 
         idxs = self._get_selected_indices()
         if not idxs:
+            return
+
+        # Controlla tutti gli step PRIMA di contattare Garmin
+        if not confirm_workouts_valid(self.root, self.df_workouts, idxs, self.df_parameters, require_date=True):
             return
 
         def operation(loading):
@@ -954,7 +983,7 @@ class TrainingPlannerGUI:
                     ).strip()
 
                     if not workout_id:
-                        print(f"Ã¢Å¡Â Ã¯Â¸Â Workout creato (riga {idx}) ma nessun 'workoutId' nella risposta.")
+                        print(f"⚠️ Workout creato (riga {idx}) ma nessun 'workoutId' nella risposta.")
                         continue
 
                     self.df_workouts.at[idx, "WorkoutId"] = workout_id
@@ -978,13 +1007,12 @@ class TrainingPlannerGUI:
                 if schedule_id:
                     self.df_workouts.at[idx, "WorkoutScheduleId"] = schedule_id
                 else:
-                    print("Ã¢Å¡Â Ã¯Â¸Â Nessun workoutScheduleId nella risposta:", resp_sched)
+                    print("⚠️ Nessun workoutScheduleId nella risposta:", resp_sched)
 
                 self.df_workouts.at[idx, "ScheduledDate"] = date_str
                 self.root.after(0, lambda idx=idx: self.refresh_tree_row(idx))
                 total += 1
 
-            self.root.after(0, self.autosave_to_loaded_excel)
             return True, f"Pianificati {total} workout."
         
         self._run_with_loading(operation, "Caricamento e pianificazione workout")
@@ -1033,7 +1061,7 @@ class TrainingPlannerGUI:
                         error_msg = (
                             f"Garmin ha risposto 403 Forbidden nel tentativo di rimuovere "
                             f"la pianificazione (scheduleId {schedule_id}, {sched_date}).\n\n"
-                            f"Questo significa che l'API usata non ÃƒÂ¨ autorizzata "
+                            f"Questo significa che l'API usata non è autorizzata "
                             f"a cancellare la programmazione. Per questo allenamento dovrai "
                             f"rimuovere la pianificazione manualmente da Garmin Connect.\n\n"
                             f"Dettagli tecnici:\n{msg}"
@@ -1044,10 +1072,9 @@ class TrainingPlannerGUI:
                         raise RuntimeError(error_msg)
 
             if removed:
-                self.root.after(0, self.autosave_to_loaded_excel)
                 return True, f"Rimossi {removed} workout dalla programmazione."
             else:
-                msg = ("Nessun workout ÃƒÂ¨ stato rimosso.\n"
+                msg = ("Nessun workout è stato rimosso.\n"
                        "Verifica che le righe selezionate abbiano sia ScheduledDate sia WorkoutScheduleId compilati.")
                 return True, msg
         
@@ -1073,7 +1100,7 @@ class TrainingPlannerGUI:
         # Conferma utente (operazione distruttiva)
         confirm_msg = (
             "Vuoi cancellare DEFINITIVAMENTE i workout selezionati dalla libreria Garmin?\n"
-            "Se sono pianificati, verrÃƒÂ  prima rimossa la pianificazione."
+            "Se sono pianificati, verrà prima rimossa la pianificazione."
         )
         if messagebox.askyesno("Conferma", confirm_msg) is False:
             return
@@ -1098,7 +1125,7 @@ class TrainingPlannerGUI:
                 if sched_date.lower() in ("nan", "<na>"):
                     sched_date = ""
 
-                # 1) se c'ÃƒÂ¨ una pianificazione, prova a toglierla
+                # 1) se c'è una pianificazione, prova a toglierla
                 if schedule_id and sched_date:
                     try:
                         loading.update_message(f"Rimozione pianificazione workout {i}/{num_workouts}...")
@@ -1110,7 +1137,7 @@ class TrainingPlannerGUI:
                     except Exception as e:
                         # Non blocco la cancellazione del workout, ma avviso
                         print(
-                            f"Ã¢Å¡Â Ã¯Â¸Â Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
+                            f"⚠️ Errore nel rimuovere la pianificazione (scheduleId {schedule_id}): {e}"
                         )
 
                 # 2) cancella il workout dalla libreria
@@ -1127,10 +1154,9 @@ class TrainingPlannerGUI:
                 deleted += 1
 
             if deleted:
-                self.root.after(0, self.autosave_to_loaded_excel)
                 return True, f"Cancellati definitivamente {deleted} workout dalla libreria Garmin."
             else:
-                return True, "Nessun workout ÃƒÂ¨ stato cancellato (nessun WorkoutId valido nelle righe selezionate)."
+                return True, "Nessun workout è stato cancellato (nessun WorkoutId valido nelle righe selezionate)."
         
         self._run_with_loading(operation, "Cancellazione workout da Garmin")
 

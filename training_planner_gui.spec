@@ -1,47 +1,34 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+# Build:  python -m PyInstaller training_planner_gui.spec
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
-datas = []
+datas = collect_data_files('sv_ttk') + collect_data_files('tkcalendar')
 binaries = []
-hiddenimports = []
-tmp_ret = collect_all('numpy')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('pandas')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-
+hiddenimports = ['babel.numbers', 'tkcalendar', 'sv_ttk', 'darkdetect']
+for pkg in ('numpy', 'pandas'):
+    d, b, h = collect_all(pkg)
+    datas += d; binaries += b; hiddenimports += h
 
 a = Analysis(
-    ['training_planner_gui.py'],
+    ['garmin_planner.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
-    optimize=0,
 )
 pyz = PYZ(a.pure)
 
 exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='training_planner_gui',
+    pyz, a.scripts, a.binaries, a.datas, [],
+    name='GarminTrainingPlanner',
     debug=False,
-    bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
-    disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
 )
+app = BUNDLE(exe, name='GarminTrainingPlanner.app', bundle_identifier=None)  # solo macOS

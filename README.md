@@ -30,28 +30,32 @@ Un'applicazione desktop Python che consente di creare workout strutturati per ru
 - ✅ **Nome file intelligente** auto-generato basato su filtri
 - ✅ **Statistiche dettagliate** per sport e periodo
 
-### 🎨 Interfacce Multiple
-- **Classic Edition**: Interfaccia essenziale e veloce
-- **Advanced Edition**: Editor visuale con drag-and-drop
-- **Multi-Sport Edition**: Supporto completo per triathlon
+### 🎨 Un'unica interfaccia (v3)
+- Tema **chiaro/scuro** (segue il Mac, pulsante ☾/☀ per cambiarlo)
+- Lista degli allenamenti **divisa per settimana**, con durata e km stimati e stato (da caricare, su Garmin, pianificato, errore)
+- **Editor dell'allenamento** con profilo grafico dell'intensità, lista degli step, modelli rapidi e testo DSL con colori e controllo mentre scrivi
+- Scheda **Parametri** (zone e ritmi) e **Panoramica** con i km per settimana
+- Supporto running, ciclismo e nuoto
 
 ### 🔐 Sicurezza
 - ✅ Autenticazione con supporto MFA
-- ✅ Sessioni salvate localmente
 - ✅ Nessuna password memorizzata
+- ✅ Sessione salvata **fuori dal progetto** in `~/.garminplanner/tokens` (permessi 600), quindi non finisce mai su git
+- ⚠️ I file token danno accesso al tuo account Garmin: non condividerli e non caricarli online
 
 ---
 
 ## 📦 Requisiti
 
 ### Python
-- Python 3.8 o superiore
+- Python 3.9 o superiore
 - tkinter (incluso nella distribuzione standard)
 
 ### Dipendenze
 ```bash
-pip install pandas openpyxl garth tkcalendar
+pip install -r requirements.txt
 ```
+(pandas, openpyxl, tkcalendar, garth). Nota: `garth`, la libreria non ufficiale per Garmin Connect, è stata dichiarata *deprecated* dal suo autore; la versione è fissata in `requirements.txt`.
 
 ---
 
@@ -59,29 +63,22 @@ pip install pandas openpyxl garth tkcalendar
 
 ### 1. Clona il repository
 ```bash
-git clone https://github.com/tuousername/garmin-training-planner.git
-cd garmin-training-planner
+git clone https://github.com/yesnoj/garminPlannerCGPT.git
+cd garminPlannerCGPT
 ```
 
 ### 2. Installa le dipendenze
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
+Usa lo **stesso `python`** con cui avvii l'app (su Windows spesso `py -m pip install -r requirements.txt`).
+Se il tema `sv-ttk` manca l'app funziona lo stesso, con un tema chiaro/scuro di riserva, e lo segnala nella barra di stato.
 
 ### 3. Avvia l'applicazione
 ```bash
-# GUI Classic
-python training_planner_gui.py
-
-# GUI Advanced (con editor visuale)
-python training_planner_gui_advanced.py
-
-# GUI Multisport (per triathlon)
-python training_planner_multisport_gui.py
-
-# Launcher unificato (scegli la GUI all'avvio)
-python launcher.py
+python garmin_planner.py      # oppure: python launcher.py
 ```
+Le vecchie interfacce (Classic, Advanced, Multisport) restano per ora in `legacy/`.
 
 ---
 
@@ -92,156 +89,134 @@ python launcher.py
 #### 1.1 Primo Avvio
 
 ```bash
-python launcher.py
+python garmin_planner.py
 ```
 
-Scegli la versione GUI:
-- 📊 **Standard**: Funzionalità essenziali
-- ⚡ **Advanced**: Editor visuale avanzato
-- 🏊 **Multisport**: Supporto triathlon completo
+- **Apri…** un piano Excel esistente, oppure **Nuovo piano** per crearne uno da un modello.
+- A sinistra trovi gli allenamenti divisi per settimana; cerca per testo o filtra (da caricare, pianificati, con errori, da oggi in poi).
+- Selezionando un allenamento si apre l'**editor** a destra:
+  - titolo, data, sport, settimana e sessione;
+  - **profilo** dell'allenamento: la larghezza è la durata, l'altezza l'intensità, il colore il tipo di step (passa col mouse per i dettagli);
+  - scheda **Step**: aggiungi step o ripetizioni, **Modelli rapidi** (ripetute, soglia, allunghi…), modifica con doppio clic, **trascina col mouse** per riordinare (rilascia al centro di una ripetizione per metterci dentro lo step), oppure usa ↑ ↓ e ⇥ ⇤;
+  - scheda **Testo DSL**: il testo con i colori, gli errori evidenziati in rosso mentre scrivi;
+  - **Salva allenamento** aggiorna anche il file Excel (gli altri fogli del file restano intatti).
+- Nella lista: **trascina** un allenamento per riordinarlo, anche in un'altra settimana (la data si sposta dello stesso numero di settimane); **tasto destro** per Duplica, Duplica nella settimana successiva, Sposta su/giù, Ordina per data e le operazioni Garmin. Selezionando una settimana intera, Duplica copia tutta la settimana.
+- Scorciatoie: ⌘O apri, ⌘S salva, ⌘N nuovo allenamento, ⌘D duplica, ⌘↑/⌘↓ sposta (Ctrl su Windows/Linux).
 
 #### 1.2 Login a Garmin Connect
 
-1. Clicca su **"🔐 Login"**
-2. Inserisci email e password Garmin Connect
+1. Clicca su **Accedi…** in alto a destra
+2. Inserisci email e password Garmin Connect (o **Usa sessione salvata**)
 3. Se richiesto, inserisci il codice MFA
-4. La sessione viene salvata automaticamente per i prossimi utilizzi
+4. La sessione viene salvata in `~/.garminplanner/tokens` per i prossimi utilizzi
 
 #### 1.3 Creare Workout con Excel
 
 ##### Genera il Template
-1. Clicca su **"📄 Genera Excel"**
+1. Clicca su **"📄 Genera Excel"** (oppure parti da `examples/esempio_running.xlsx`)
 2. Salva il file template nella directory desiderata
 
 ##### Struttura Excel
 
-**Sheet "Workouts":**
+**Sheet "Workouts"** (una riga per allenamento):
+
 | Week | Date | Session | Sport | Description | Steps |
 |------|------|---------|-------|-------------|-------|
-| 1 | 2025-01-27 | 1 | running | Easy Run | warmup 10min Z2; run 30min Z3; cooldown 5min Z1 |
-| 1 | 2025-01-29 | 2 | running | Intervals | warmup 15min Z2; 5x(run 5min Z4; recover 2min Z1); cooldown 10min Z1 |
-| 2 | 2025-02-01 | 3 | cycling | Threshold | warmup 10min FTP_Z2; bike 20min FTP_Z4; cooldown 10min FTP_Z1 |
+| 1 | 2026-10-05 | 1 | Running | Facile 6 km | `interval: 6km @ easy_range` |
+| 1 | 2026-10-07 | 2 | Running | 5×1000 m @4:50-5:00 rec 2' | *(vedi esempio multiriga sotto)* |
+| 1 | 2026-10-10 | 3 | Running | Lungo 12 km | `interval: 12km @ long_range` |
 
-**Sheet "Parameters":**
+Le colonne `WorkoutId`, `WorkoutScheduleId` e `ScheduledDate` vengono compilate dal programma dopo il caricamento su Garmin.
+
+**Sheet "Parameters"** (zone e ritmi riutilizzabili):
+
 | Key | Metric | Expression | Notes |
 |-----|--------|------------|-------|
-| Z1 | pace | 6:30-7:00 | Recovery |
-| Z2 | pace | 5:50-6:20 | Easy |
-| Z3 | pace | 5:20-5:45 | Tempo |
-| Z4 | pace | 4:50-5:15 | Threshold |
-| Z5 | pace | 4:20-4:45 | VO2max |
-| FTP_Z1 | power | 0.55 | Active Recovery |
-| FTP_Z2 | power | 0.56-0.75 | Endurance |
+| Z1 | pace | 7:00-7:30 | Recupero |
+| Z2 | pace | 6:35-7:00 | Facile |
+| easy_range | pace | 6:35-7:00 | Chiave personalizzata |
+| HR_Z2 | hr | 70-80% | % di HR_max |
+| HR_max | hr | 179 | Frequenza massima |
+| pace_tolerance | pace | 5 | ± secondi per i ritmi singoli |
 
-#### 1.4 DSL Syntax - Linguaggio Workout
+Le chiavi si cercano **senza distinzione tra maiuscole e minuscole** (`Easy_Range` = `easy_range`).
 
-##### Step Base
-```
-<tipo> <durata> <target>
-```
+#### 1.4 DSL - Linguaggio dei Workout
 
-**Tipi di step:**
-- `warmup` - Riscaldamento
-- `run` / `bike` / `swim` - Allenamento principale
-- `recover` - Recupero
-- `cooldown` - Defaticamento
-
-**Durata:**
-- Tempo: `10min`, `30sec`, `2h`
-- Distanza: `5km`, `400m`, `100m`
-- Manuale: `lap-button`
-
-**Target:**
-
-**Running:**
-- Zone pace: `Z1`, `Z2`, `Z3`, `Z4`, `Z5`
-- Pace specifico: `5:00`, `4:30-4:45`
-- Zone HR: `HR_Z2`, `HR_Z3`
-- Aperto: `open`
-
-**Cycling:**
-- Potenza: `200W`, `180-220W`
-- Zone potenza: `FTP_Z2`, `FTP_Z3`
-- Cadenza: `90rpm`, `100rpm`
-- Aperto: `open`
-
-**Swimming:**
-- Pace: `1:30/100m`, `1:20-1:35/100m`
-- Aperto: `open`
-
-##### Ripetizioni
-
-**Sintassi:**
-```
-<numero>x(<step1>; <step2>; ...)
-```
-
-**Esempi:**
-```
-5x(run 1km Z4; recover 400m Z1)
-8x(run 400m Z5; recover 200m Z1)
-3x(bike 5min 250W; recover 3min 150W)
-```
-
-##### Ripetizioni Annidate
+Una riga per step, nel formato:
 
 ```
-3x(
-    run 1km Z4; 
-    4x(run 200m Z5; recover 100m Z1); 
-    recover 400m Z2
-)
+tipo: durata @ target
 ```
 
-##### Esempi Pratici
+**Tipi di step:** `warmup`, `interval`, `recovery` (recupero attivo), `rest` (riposo da fermo), `cooldown`.
 
-**Easy Run:**
+**Durata o distanza:**
+
+| Scrivi | Significa |
+|---|---|
+| `10min`, `10'`, `1.5min`, `10 minuti` | minuti |
+| `30sec`, `30s`, `90s` | secondi |
+| `1h`, `1.5h` | ore |
+| `1:30`, `1:05:00` | mm:ss / h:mm:ss |
+| `400m`, `1.5km`, `21.1km` | distanza (**`10m` = 10 metri**, non minuti!) |
+| `lap-button` | finché non premi Lap |
+
+**Target (dopo `@`, facoltativo):**
+
+| Scrivi | Significa |
+|---|---|
+| `5:00` | ritmo ± `pace_tolerance` |
+| `4:50-5:00` | intervallo di ritmo |
+| `Z1` … `Z5` | zona ritmo dal foglio Parameters |
+| `HR_Z1` … `HR_Z5`, `140-160` | frequenza cardiaca |
+| `easy_range`, `hmp`, … | qualunque chiave del foglio Parameters |
+| `250W`, `200-250W`, `Power_Z2` | potenza (bici) |
+| `90rpm`, `Cadence_Easy` | cadenza (bici) |
+| `1:45/100m`, `Swim_Z2` | ritmo nuoto |
+| `open` o niente | nessun target |
+
+**Ripetizioni:** `repeat N:` e sotto, **rientrati**, gli step da ripetere (2 o 4 spazi o tab, basta che siano coerenti). Si possono annidare.
+
 ```
-warmup 10min Z2; run 30min Z3; cooldown 5min Z1
+warmup: 15min @ Z2
+repeat 5:
+  interval: 1000m @ 4:50-5:00
+  recovery: 2min @ Z1
+cooldown: 10min @ Z1
 ```
 
-**Interval Training:**
 ```
-warmup 15min Z2; 8x(run 400m Z5; recover 200m Z1); cooldown 10min Z1
-```
-
-**Tempo Run:**
-```
-warmup 15min Z2; run 20min Z4; cooldown 10min Z1
-```
-
-**Long Run Progressivo:**
-```
-warmup 10min Z2; run 20min Z3; run 20min Z4; run 10min Z5; cooldown 10min Z1
+warmup: lap-button @ Z2
+repeat 2:
+  repeat 6:
+    interval: 1min @ 4:30
+    recovery: 1min @ Z1
+  rest: 3min
 ```
 
-**Cycling Intervals:**
+Righe vuote e righe che iniziano con `#` vengono ignorate; tutto ciò che segue `--` su una riga è un commento.
+
+##### Controllo errori
+
+Prima di ogni caricamento il programma **controlla tutti i workout selezionati**. Se qualcosa non è valido (durata non riconosciuta, zona inesistente, chiave mancante in Parameters, `repeat` senza step, data mancante…) **non viene caricato niente** e compare l'elenco dei problemi con riga Excel e riga del DSL, ad esempio:
+
 ```
-warmup 15min FTP_Z2; 5x(bike 5min 250W; recover 3min 150W); cooldown 10min FTP_Z1
+Riga Excel 5 W2S1 «Facile 6 km»: riga 1: zona 'Z7' non valida (usa Z1-Z5)  →  «interval: 6km @ Z7»
 ```
 
-**Swimming Workout:**
-```
-warmup 200m open; 10x(swim 100m 1:30/100m; rest 20sec); cooldown 200m open
-```
-
-**Fartlek:**
-```
-warmup 10min Z2; 6x(run 3min Z4; run 2min Z2); cooldown 10min Z1
-```
+Il foglio **"Esempi DSL"** del template contiene altri esempi pronti.
 
 #### 1.5 Upload su Garmin
 
-1. **Carica Excel** con i workout creati
-2. Seleziona i workout dalla lista
-3. Scegli l'operazione:
-   - **📤 Carica**: Solo upload nella libreria Garmin
-   - **📤📅 Carica+Pianifica**: Upload e programmazione nel calendario
-   - **📅✖ Rimuovi Piano**: Rimuove programmazione (ma non elimina il workout)
-   - **🗑 Cancella**: Elimina definitivamente da Garmin
-
-4. Attendi la conferma
-5. I workout sono ora disponibili sul tuo dispositivo Garmin!
+1. Seleziona uno o più allenamenti (o un'intera settimana) nella lista
+2. Scegli l'operazione nella barra "Garmin":
+   - **Carica e pianifica**: crea il workout (se serve) e lo mette nel calendario alla sua data
+   - **Solo carica**: solo nella libreria Garmin
+   - **Togli dal calendario**: rimuove la pianificazione, il workout resta nella libreria
+   - **Elimina da Garmin**: cancella definitivamente il workout (resta nel tuo Excel)
+3. Prima di inviare, tutti gli allenamenti selezionati vengono controllati: se c'è un errore non parte nulla
+4. Gli ID Garmin vengono salvati nell'Excel dopo ogni operazione, anche se si interrompe a metà: un nuovo tentativo non crea doppioni
 
 ---
 
@@ -378,8 +353,8 @@ Il file Excel generato contiene **4 sheet** ottimizzati per l'analisi AI:
 
 | Week | Date | Time | Session | Sport | Description | Distance (km) | Duration | Avg Pace | Avg HR | Calories | Steps | ActivityId |
 |------|------|------|---------|-------|-------------|---------------|----------|----------|--------|----------|-------|------------|
-| 3 | 2026-01-21 | 19:26 | 1 | running | Modena Corsa | 7.84 | 47:15 | 6:01 | 145 | 456 | **warmup 5min Z2; run 37min 6:01; cooldown 5min Z1** | 21622466117 |
-| 3 | 2026-01-18 | 18:45 | 2 | running | Long Run | 10.01 | 63:15 | 6:19 | 138 | 672 | **warmup 6min Z2; run 51min 6:19; cooldown 6min Z1** | 21609834521 |
+| 3 | 2026-01-21 | 19:26 | 1 | running | Modena Corsa | 7.84 | 47:15 | 6:01 | 145 | 456 | `warmup: 5min @ Z2` / `interval: 37min @ 6:01` / `cooldown: 5min @ Z1` | 21622466117 |
+| 3 | 2026-01-18 | 18:45 | 2 | running | Long Run | 10.01 | 63:15 | 6:19 | 138 | 672 | `warmup: 6min @ Z2` / `interval: 51min @ 6:19` / `cooldown: 6min @ Z1` | 21609834521 |
 
 **Colonne:**
 - **Week**: Settimana dell'anno della corsa
@@ -403,7 +378,10 @@ Questa colonna contiene la **sintassi DSL ricostruita automaticamente** dalle me
 ```
 Activity reale: 7.84 km in 47:15 (pace 6:01/km)
 ↓ Algoritmo di conversione ↓
-DSL generato: warmup 5min Z2; run 37min 6:01; cooldown 5min Z1
+DSL generato (una riga per step, ricaricabile così com'è):
+warmup: 5min @ Z2
+interval: 37min @ 6:01
+cooldown: 5min @ Z1
 ```
 
 **Perché è importante:**
@@ -591,7 +569,8 @@ L'AI può:
 ### Errore Login Garmin
 - Verifica email e password
 - Controlla il codice MFA se abilitato
-- Elimina la cartella `./garminconnect` e riprova
+- Elimina la cartella `~/.garminplanner/tokens` e rifai il login con email e password
+- Per vedere i JSON scambiati con Garmin avvia con `GARMINPLANNER_DEBUG=1 python launcher.py`
 
 ### Workout Non Visibile su Garmin
 - Verifica di aver fatto il login
@@ -599,9 +578,10 @@ L'AI può:
 - Ricarica/sincronizza l'app Garmin sul dispositivo
 
 ### Errore nella Sintassi DSL
-- Verifica gli spazi: `run 5min Z2` (non `run5minZ2`)
-- Usa punto e virgola per separare step: `warmup 10min Z2; run 20min Z3`
-- Le parentesi devono essere bilanciate: `5x(...)`
+- Leggi il messaggio: indica riga Excel, riga del DSL e il motivo
+- Formato: `tipo: durata @ target`, una riga per step (niente `;` né `5x(...)`)
+- Sotto `repeat N:` gli step vanno rientrati
+- `10m` sono 10 metri: per i minuti scrivi `10min`
 
 ### DateEntry Non Funziona
 ```bash
@@ -627,21 +607,24 @@ pip install tkcalendar
 ## 📁 Struttura Progetto
 
 ```
-garmin-training-planner/
-├── launcher.py                          # Launcher unificato
-├── training_planner_gui.py             # GUI Classic
-├── training_planner_gui_advanced.py    # GUI Advanced
-├── training_planner_multisport_gui.py  # GUI Multi-Sport
-├── download_dialog.py                  # Dialog download (v2.0) ⭐ NEW
-├── garmin_service.py                   # API Garmin Connect
-├── dsl_parser.py                       # Parser DSL
-├── excel_utils.py                      # Utilità Excel
-├── requirements.txt                    # Dipendenze Python
-├── README.md                           # Questa guida
+garminPlannerCGPT/
+├── garmin_planner.py                   # App (finestra principale)
+├── workout_editor.py                   # Editor allenamento: profilo, step, testo DSL
+├── workout_model.py                    # Albero step <-> DSL, stime durata/km/intensità
+├── app_theme.py                        # Tema chiaro/scuro e colori
+├── launcher.py                         # Avvio (compatibilità)
+├── gui_helpers.py                      # Finestra errori di validazione
+├── legacy/                             # Vecchie interfacce v2 (riserva)
+├── download_dialog.py                  # Dialog download
+├── garmin_service.py                   # Login/sessione Garmin Connect
+├── garmin_client.py                    # Chiamate API workout-service
+├── dsl_parser.py                       # Parser DSL + validazione
+├── excel_utils.py                      # Template e formattazione Excel
+├── requirements.txt / requirements-dev.txt
+├── tests/                              # Test pytest (parser, token)
 └── examples/
-    ├── example_plan_running.xlsx
-    ├── example_plan_cycling.xlsx
-    └── example_plan_multisport.xlsx
+    ├── esempio_running.xlsx
+    └── esempio_multisport.xlsx
 ```
 
 ---
@@ -660,22 +643,22 @@ venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 
 # Installa dipendenze di sviluppo
-pip install pytest black flake8
+pip install -r requirements-dev.txt
 ```
 
 ### Eseguire i Test
 
 ```bash
-pytest tests/
+python -m pytest -q
 ```
+I test non richiedono né la GUI né la connessione a Garmin.
 
 ### Build Eseguibile
 
 ```bash
-# Windows
 python -m PyInstaller training_planner_gui.spec
 
-# Il file .exe sarà in dist/
+# Risultato in dist/ (GarminTrainingPlanner.app su macOS, .exe su Windows)
 ```
 
 ---
@@ -693,6 +676,44 @@ I contributi sono benvenuti! Per favore:
 ---
 
 ## 📝 Changelog
+
+### v3.2.0 (2026-09-30)
+- 🌗 Tema scuro leggibile anche senza sv-ttk (tema di riserva completo) e barra del titolo scura su Windows
+- 🧰 Barra degli strumenti che va a capo se la finestra è stretta
+
+
+### v3.1.0 (2026-09-30)
+- 🖱️ Trascinamento col mouse per riordinare gli step (anche dentro/fuori dalle ripetizioni) e gli allenamenti nella lista (anche tra settimane)
+- 📋 Menu col tasto destro nella lista; "Duplica nella settimana successiva"; Sposta su/giù; Ordina per data; ⌘D
+- 🌗 Tema scuro esteso a calendario delle date, menu, tendine, finestra errori e download
+
+
+### v3.0.0 (2026-09-30)
+- 🎨 Nuova interfaccia unica al posto di Classic/Advanced/Multisport (spostate in `legacy/`)
+- 🌗 Tema chiaro/scuro (sv-ttk), segue le impostazioni del sistema
+- 📅 Lista per settimane con durata, km stimati e stato di ogni allenamento; ricerca e filtri
+- ✏️ Editor integrato: profilo grafico dell'intensità, step con dialog guidato, modelli rapidi, testo DSL evidenziato con controllo live
+- 📊 Panoramica con i km per settimana; gestione parametri con dialog
+- 💾 Il salvataggio conserva gli altri fogli del file Excel (es. Impostazioni, Esempi DSL)
+- 🔁 "Carica e pianifica" salta gli allenamenti già in calendario alla stessa data
+
+
+### v2.1.0 (2026-09-30)
+**Sicurezza**
+- 🔐 Token di sessione spostati in `~/.garminplanner/tokens` (permessi 600); migrazione automatica dalla vecchia cartella `./garminconnect`
+- 🔐 Nessun token, dato personale o file di sistema nel repository (`.gitignore`)
+- 🔐 Password cancellata dal campo dopo il login; log dei JSON solo con `GARMINPLANNER_DEBUG=1`
+
+**Affidabilità**
+- ✅ Il parser segnala gli errori (riga Excel + riga DSL) invece di creare step da 60 secondi o senza target
+- ✅ Validazione di tutti i workout selezionati prima di contattare Garmin
+- ✅ Gli ID Garmin vengono salvati nell'Excel anche se il caricamento si interrompe a metà (niente doppioni al nuovo tentativo)
+- ✅ Chiavi di Parameters senza distinzione maiuscole/minuscole (Swim_Z*, Cadence_* ora funzionano)
+- ✅ Durate decimali e in ore, indentazione libera sotto `repeat`, step `rest` inviati come Riposo
+- ✅ Il download genera il DSL nel formato reale (ricaricabile)
+- 🧹 Rimossi `dsl_parser_multisport.py` ed `excel_utils_multisport.py` (duplicati mai usati); caratteri accentati corretti
+- 🧪 Test automatici (`tests/`)
+
 
 ### v2.0.0 (2026-01-26) ⭐ MAJOR RELEASE
 **Nuove Funzionalità:**
@@ -754,8 +775,8 @@ Questo progetto è rilasciato sotto licenza MIT. Vedi il file `LICENSE` per i de
 ## 📧 Supporto
 
 Per bug, richieste di funzionalità o domande:
-- 🐛 [Issues](https://github.com/tuousername/garmin-training-planner/issues)
-- 💬 [Discussions](https://github.com/tuousername/garmin-training-planner/discussions)
+- 🐛 [Issues](https://github.com/yesnoj/garminPlannerCGPT/issues)
+- 💬 [Discussions](https://github.com/yesnoj/garminPlannerCGPT/discussions)
 - 📧 Email: tuoemail@example.com
 
 ---

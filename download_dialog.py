@@ -6,6 +6,12 @@ Dialog per download workout/attività da Garmin Connect
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkcalendar import DateEntry
+from app_theme import style_date_entry
+import app_theme
+
+
+def _col(name):
+    return app_theme.CURRENT.c[name] if app_theme.CURRENT else {"info": "blue", "err": "red"}[name]
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
@@ -75,14 +81,13 @@ class DownloadDialog:
         self.date_start = DateEntry(
             date_frame,
             width=20,
-            background='darkblue',
-            foreground='white',
             borderwidth=2,
             year=start_default.year,
             month=start_default.month,
             day=start_default.day,
             date_pattern='yyyy-mm-dd'
         )
+        style_date_entry(self.date_start)
         self.date_start.grid(row=0, column=1, sticky="w", padx=(10, 0), pady=5)
         self.date_start.bind('<<DateEntrySelected>>', lambda e: self._update_filename())
         
@@ -92,14 +97,13 @@ class DownloadDialog:
         self.date_end = DateEntry(
             date_frame,
             width=20,
-            background='darkblue',
-            foreground='white',
             borderwidth=2,
             year=today.year,
             month=today.month,
             day=today.day,
             date_pattern='yyyy-mm-dd'
         )
+        style_date_entry(self.date_end)
         self.date_end.grid(row=1, column=1, sticky="w", padx=(10, 0), pady=5)
         self.date_end.bind('<<DateEntrySelected>>', lambda e: self._update_filename())
         
@@ -176,7 +180,7 @@ class DownloadDialog:
         ttk.Label(
             sport_frame,
             text="ℹ️  Il filtro sport viene applicato dopo il download",
-            foreground="gray",
+            style="Small.TLabel",
             font=("", 8)
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
         
@@ -205,7 +209,7 @@ class DownloadDialog:
         ttk.Label(
             format_frame,
             text="ℹ️  Excel genera DSL dalle attività, JSON mantiene i dati originali",
-            foreground="gray",
+            style="Small.TLabel",
             font=("", 8)
         ).pack(anchor="w", pady=(5, 0))
         
@@ -227,7 +231,7 @@ class DownloadDialog:
         ttk.Label(
             dest_frame,
             text="💡 Il nome viene generato automaticamente in base ai filtri selezionati",
-            foreground="gray",
+            style="Small.TLabel",
             font=("", 8)
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
         
@@ -251,7 +255,7 @@ class DownloadDialog:
         self.status_label = ttk.Label(
             main_frame,
             text="",
-            foreground="blue",
+            style="Muted.TLabel",
             font=("", 9)
         )
         self.status_label.pack(pady=(10, 0))
@@ -364,7 +368,7 @@ class DownloadDialog:
                 filename = filename + '.json'
         
         # Disabilita UI durante download
-        self.status_label.config(text="⏳ Download in corso...", foreground="blue")
+        self.status_label.config(text="⏳ Download in corso...", foreground=_col("info"))
         self.dialog.update()
         
         try:
@@ -418,7 +422,7 @@ class DownloadDialog:
             self.dialog.destroy()
             
         except Exception as e:
-            self.status_label.config(text="", foreground="red")
+            self.status_label.config(text="", foreground=_col("err"))
             messagebox.showerror("Errore", f"Errore durante il download:\n{str(e)}")
     
     def _download_workouts(self, start_date, end_date):
@@ -856,24 +860,22 @@ class DownloadDialog:
             # Durata totale in minuti
             duration_min = int(duration / 60)
             
+            # Formato DSL reale del parser ("tipo: durata @ target", una riga per step)
+            target = f" @ {pace_str}" if pace_str != "open" and sport == "running" else ""
+
             if duration_min < 15:
-                # Workout corto - un solo blocco
-                step_type = "run" if sport == "running" else "bike" if sport == "cycling" else "swim"
-                return f"{step_type} {duration_min}min {pace_str}"
-            
-            # Struttura con warmup/main/cooldown
+                return f"interval: {max(duration_min, 1)}min{target}"
+
             warmup_min = max(5, int(duration_min * 0.10))
             cooldown_min = max(5, int(duration_min * 0.10))
             main_min = duration_min - warmup_min - cooldown_min
-            
+
             if main_min <= 0:
-                step_type = "run" if sport == "running" else "bike" if sport == "cycling" else "swim"
-                return f"{step_type} {duration_min}min {pace_str}"
-            
-            step_type = "run" if sport == "running" else "bike" if sport == "cycling" else "swim"
-            
-            # Genera DSL strutturato
-            dsl = f"warmup {warmup_min}min Z2; {step_type} {main_min}min {pace_str}; cooldown {cooldown_min}min Z1"
+                return f"interval: {duration_min}min{target}"
+
+            dsl = (f"warmup: {warmup_min}min @ Z2\n"
+                   f"interval: {main_min}min{target}\n"
+                   f"cooldown: {cooldown_min}min @ Z1")
             return dsl
             
         except Exception as e:

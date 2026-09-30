@@ -5,6 +5,15 @@ Usa garth.client.request() per avere automaticamente CSRF token e cookie di sess
 import garth
 from typing import Dict, Any
 import json
+import os
+
+# Log di debug (JSON inviati/ricevuti) solo con GARMINPLANNER_DEBUG=1
+_DEBUG = os.environ.get("GARMINPLANNER_DEBUG", "") not in ("", "0")
+
+
+def _debug(*args, **kwargs):
+    if _DEBUG:
+        print(*args, **kwargs)
 
 # Endpoint costanti
 _WORKOUT_SERVICE_ENDPOINT = "/workout-service"
@@ -38,30 +47,30 @@ def schedule_workout(workout_id: str, date: str) -> Dict[str, Any]:
     json_data = {"date": date}
     response = garth.connectapi(url, method="POST", json=json_data)
 
-    print("\n=== GARMIN RESPONSE (schedule_workout) ===")
+    _debug("\n=== GARMIN RESPONSE (schedule_workout) ===")
     try:
         if hasattr(response, "json"):
             data = response.json()
             try:
-                print(json.dumps(data, indent=2, ensure_ascii=False))
+                _debug(json.dumps(data, indent=2, ensure_ascii=False))
             except Exception:
                 # se ci sono problemi con caratteri strani, stampiamo grezzo
-                print(data)
-            print("=== END SCHEDULE RESPONSE ===\n")
+                _debug(data)
+            _debug("=== END SCHEDULE RESPONSE ===\n")
             return data
         else:
             # in alcune versioni garth può restituire già un dizionario
-            print(response)
-            print("=== END SCHEDULE RESPONSE ===\n")
+            _debug(response)
+            _debug("=== END SCHEDULE RESPONSE ===\n")
             return response
     except Exception as e:
-        print(f"Errore nel leggere la risposta JSON: {e}")
+        _debug(f"Errore nel leggere la risposta JSON: {e}")
         # se è un oggetto tipo requests.Response, proviamo a stampare il testo
         if hasattr(response, "text"):
-            print("Response.text:", response.text)
+            _debug("Response.text:", response.text)
         else:
-            print("Response object:", response)
-        print("=== END SCHEDULE RESPONSE (ERROR) ===\n")
+            _debug("Response object:", response)
+        _debug("=== END SCHEDULE RESPONSE (ERROR) ===\n")
         raise
 
 
@@ -86,10 +95,10 @@ def remove_workout_schedule(workout_id: str, date: str) -> Any:
     # IMPORTANTE: endpoint relativo, come nelle altre funzioni
     url = f"{_WORKOUT_SERVICE_ENDPOINT}/schedule/{workout_id}"
 
-    print(f"🔄 Rimozione pianificazione workout {workout_id} del {date}...")
-    print(f"   URL (relative): {url}")
-    print("   Host: connectapi.garmin.com (via garth.connectapi)")
-    print("   Method: DELETE")
+    _debug(f"🔄 Rimozione pianificazione workout {workout_id} del {date}...")
+    _debug(f"   URL (relative): {url}")
+    _debug("   Host: connectapi.garmin.com (via garth.connectapi)")
+    _debug("   Method: DELETE")
 
     try:
         # Usiamo garth.connectapi come per la POST di schedule_workout
@@ -100,15 +109,15 @@ def remove_workout_schedule(workout_id: str, date: str) -> Any:
 
         if status_code is None:
             # Nessun status_code: se non è esploso, consideriamo la cosa un successo
-            print("✅ Workout dis-pianificato (nessun status_code, nessuna eccezione)")
+            _debug("✅ Workout dis-pianificato (nessun status_code, nessuna eccezione)")
             return response
 
         if status_code in (200, 204):
-            print(f"✅ SUCCESS! Workout dis-pianificato (Status {status_code})")
+            _debug(f"✅ SUCCESS! Workout dis-pianificato (Status {status_code})")
             return response
 
         # Altri status code -> fallo esplodere per finire nel blocco except
-        print(f"⚠️  Status {status_code}")
+        _debug(f"⚠️  Status {status_code}")
         if hasattr(response, "raise_for_status"):
             response.raise_for_status()
         else:
@@ -186,10 +195,10 @@ def delete_workout_definition(workout_id: str) -> Any:
     """
     url = f"{_WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
 
-    print(f"🗑️ Cancellazione DEFINITIVA workout {workout_id}...")
-    print(f"   URL (relative): {url}")
-    print("   Host: connectapi.garmin.com (via garth.connectapi)")
-    print("   Method: DELETE")
+    _debug(f"🗑️ Cancellazione DEFINITIVA workout {workout_id}...")
+    _debug(f"   URL (relative): {url}")
+    _debug("   Host: connectapi.garmin.com (via garth.connectapi)")
+    _debug("   Method: DELETE")
 
     try:
         response = garth.connectapi(url, method="DELETE")
@@ -197,14 +206,14 @@ def delete_workout_definition(workout_id: str) -> Any:
         status_code = getattr(response, "status_code", None)
 
         if status_code is None:
-            print("✅ Workout cancellato (nessun status_code, nessuna eccezione)")
+            _debug("✅ Workout cancellato (nessun status_code, nessuna eccezione)")
             return response
 
         if status_code in (200, 204):
-            print(f"✅ SUCCESS! Workout cancellato (Status {status_code})")
+            _debug(f"✅ SUCCESS! Workout cancellato (Status {status_code})")
             return response
 
-        print(f"⚠️  Status {status_code}")
+        _debug(f"⚠️  Status {status_code}")
         if hasattr(response, "raise_for_status"):
             response.raise_for_status()
         else:
